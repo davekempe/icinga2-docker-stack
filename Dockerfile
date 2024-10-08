@@ -49,7 +49,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     php-gmp \
     procps \
     pwgen \
-    python \
+    python3 \
     python3-requests \
     snmp \
     msmtp \
