@@ -1,7 +1,7 @@
 # Dockerfile for icinga2 with icingaweb2
 # https://github.com/jjethwa/icinga2
 
-FROM debian:bullseye
+FROM debian:bookworm
 
 ENV APACHE2_HTTP=REDIRECT \
     ICINGA2_FEATURE_GRAPHITE=false \
@@ -80,6 +80,14 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     nagios-plugins-contrib \
     nagios-snmp-plugins \
     libmonitoring-plugin-perl \
+    icinga-director \
+    icinga-graphite \
+    icinga-notifications \ 
+    icinga-notifications-web \
+    icingadb \ 
+    icingadb-web \
+    icingadb-redis \
+    icinga-x509 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -90,39 +98,10 @@ ARG GITREF_INCUBATOR=v0.18.0
 ARG GITREF_IPL=v0.5.0
 
 RUN mkdir -p /usr/local/share/icingaweb2/modules/ \
-    # Icinga Director
-    && mkdir -p /usr/local/share/icingaweb2/modules/director/ \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-director/archive/v1.9.1.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/director --exclude=.gitignore -f - \
-    # Icingaweb2 Graphite
-    && mkdir -p /usr/local/share/icingaweb2/modules/graphite \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-graphite/archive/v1.2.0.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/graphite -f - \
-    # Icingaweb2 AWS
-    && mkdir -p /usr/local/share/icingaweb2/modules/aws \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-aws/archive/v1.1.0.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/aws -f - \
-    && wget -q --no-cookies "https://github.com/aws/aws-sdk-php/releases/download/3.222.8/aws.zip" \
-    && unzip -d /usr/local/share/icingaweb2/modules/aws/library/vendor/aws aws.zip \
-    && rm aws.zip \
-    # Module Reactbundle
-    && mkdir -p /usr/local/share/icingaweb2/modules/reactbundle/ \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-reactbundle/archive/v0.9.0.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/reactbundle -f - \
-    # Module Incubator
-    && mkdir -p /usr/local/share/icingaweb2/modules/incubator/ \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-incubator/archive/v0.18.0.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/incubator -f - \
-    # Module Ipl
-    && mkdir -p /usr/local/share/icingaweb2/modules/ipl/ \
-    && wget -q --no-cookies -O - "https://github.com/Icinga/icingaweb2-module-ipl/archive/v0.5.0.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/ipl -f - \
-    # Module x509
-    && mkdir -p /usr/local/share/icingaweb2/modules/x509/ \
-    && wget -q --no-cookies "https://github.com/Icinga/icingaweb2-module-x509/archive/v1.1.2.zip" \
-    && unzip -d /usr/local/share/icingaweb2/modules/x509 v1.1.2.zip \
-    && mv /usr/local/share/icingaweb2/modules/x509/icingaweb2-module-x509-1.1.2/* /usr/local/share/icingaweb2/modules/x509/ \
-    && rm -rf /usr/local/share/icingaweb2/modules/x509/icingaweb2-module-x509-1.1.2/ \
+    # Module Netbox
+    && mkdir -p /usr/local/share/icingaweb2/modules/netbox/ \
+    && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.0.8.1.tar.gz" \
+    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/netbox -f - \
     && true
 
 ADD content/ /
