@@ -91,20 +91,17 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-ARG GITREF_MODGRAPHITE=master
-ARG GITREF_MODAWS=master
-ARG GITREF_REACTBUNDLE=v0.9.0
-ARG GITREF_INCUBATOR=v0.18.0
-ARG GITREF_IPL=v0.5.0
-
-RUN mkdir -p /usr/local/share/icingaweb2/modules/ \
+RUN mkdir -p /usr/share/icingaweb2/modules/ \
     # Module Netbox
-    && mkdir -p /usr/local/share/icingaweb2/modules/netbox/ \
+    && mkdir -p /usr/share/icingaweb2/modules/netbox/ \
     && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.0.8.1.tar.gz" \
-    | tar xz --strip-components=1 --directory=/usr/local/share/icingaweb2/modules/netbox -f - \
+    | tar xz --strip-components=1 --directory=/usr/share/icingaweb2/modules/netbox -f - \
     && true
 
 ADD content/ /
+RUN chmod +x /usr/local/bin/ini_set \
+    && echo "ini_set script permissions:" \
+    && ls -l /usr/local/bin/ini_set
 
 # Final fixes
 RUN true \

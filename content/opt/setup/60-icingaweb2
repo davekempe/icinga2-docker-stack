@@ -1,6 +1,9 @@
 #!/bin/bash
 
 . /opt/helpers
+echo "Checking ini_set existence before execution"
+ls -l /usr/local/bin/ini_set || echo "ini_set not found"
+
 
 CNFSUFFIX=icingaweb2
 mysql_cnf_init_section \

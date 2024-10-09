@@ -49,7 +49,7 @@ if evaluate_boolean "${ICINGA2_FEATURE_DIRECTOR}"; then
 	mysql_test_credentials
 
 	mysql_user \
-		< /usr/local/share/icingaweb2/modules/director/schema/mysql.sql \
+		< /usr/share/icingaweb2/modules/director/schema/mysql.sql \
 		>> /var/log/icingaweb2/director-schema.log \
 		2>&1 || true
 
