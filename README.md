@@ -4,22 +4,26 @@
 
 This repository contains the source for the [icinga2](https://www.icinga.org/icinga2/) [docker](https://www.docker.com) image.
 
-The dockerhub-repository is located at [https://hub.docker.com/r/jordan/icinga2/](https://hub.docker.com/r/jordan/icinga2/).
+Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration
+
+
+
+The dockerhub-repository is located at [https://hub.docker.com/r/sol1/icinga2-stack](https://hub.docker.com/r/sol1/icinga2-stack).
 
 This build is automated by push for the git-repo. Just pull it via:
 
-    docker pull jordan/icinga2
+    docker pull sol1/icinga2-stack
 
 ## Image details
 
-1. Based on debian:bullseye
+1. Based on debian:bookworm
 1. Key-Features:
    - icinga2
    - icingacli
-   - icingaweb2
+   - icingadb
+   - icingadb-web
    - icingaweb2-director module
-   - icingaweb2-graphite module
-   - icingaweb2-module-aws
+   - icingaweb2-director netbox module
    - ssmtp
    - MySQL
    - Supervisor
@@ -33,14 +37,14 @@ This build is automated by push for the git-repo. Just pull it via:
 
 Start a new container and bind to host's port 80
 
-    docker run -p 80:80 -h icinga2 -t jordan/icinga2:latest
+    docker run -p 80:80 -h icinga2 -t sol1/icinga2-stack:latest
 
 ### docker-compose
 
 Clone the repository and create a file `secrets_sql.env`, which contains the `MYSQL_ROOT_PASSWORD` variable.
 
-    git clone https://github.com/jjethwa/icinga2.git
-    cd icinga2
+    git clone https://github.com/davekempe/icinga2-docker-stack.git
+    cd icinga2-docker-stack
     echo "MYSQL_ROOT_PASSWORD=<password>" > secrets_sql.env
     docker-compose up
 
@@ -68,23 +72,6 @@ example:
 ```
 docker run [...] -v $PWD/icingaweb2-sessions:/var/lib/php/sessions/ jordan/icinga2
 ```
-
-## Graphite
-
-The graphite writer can be enabled by setting the `ICINGA2_FEATURE_GRAPHITE` variable to `true` or `1` and also supplying values for `ICINGA2_FEATURE_GRAPHITE_HOST` and `ICINGA2_FEATURE_GRAPHITE_PORT`. This container does not have graphite and the carbon daemons installed so `ICINGA2_FEATURE_GRAPHITE_HOST` should not be set to `localhost`.
-
-Example:
-
-```
-docker run -t \
-  --link graphite:graphite \
-  -e ICINGA2_FEATURE_GRAPHITE=true \
-  -e ICINGA2_FEATURE_GRAPHITE_HOST=graphite \
-  -e ICINGA2_FEATURE_GRAPHITE_PORT=2003 \
-  jordan/icinga2:latest
-```
-
-You will need to modify the retention policy as detailed here: https://github.com/jjethwa/icinga2/issues/275#issuecomment-1046892058
 
 ## Icinga Director
 
