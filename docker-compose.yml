@@ -1,10 +1,10 @@
 version: '2'
 services:
   icinga2:
-    #image: sol1/icinga2-docker-stack
-    build:
-      context: ./
-      dockerfile: Dockerfile
+    image: sol1/icinga2-stack
+    #build:
+    #  context: ./
+    #  dockerfile: Dockerfile
     restart: on-failure:5
     # Set your hostname to the FQDN under which your
     # sattelites will reach this container
@@ -39,6 +39,8 @@ services:
       - ./data/icinga/log/mysql:/var/log/mysql
       - ./data/icinga/spool:/var/spool/icinga2
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
+      - ./data/icinga/lib/mysql:/var/lib/mysql
+
       # Sending e-mail
       #  See: https://github.com/jjethwa/icinga2#sending-notification-mails
       #  If you want to enable outbound e-mail, edit the file mstmp/msmtprc
