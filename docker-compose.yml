@@ -1,4 +1,3 @@
-version: '2'
 services:
   icinga2:
     image: sol1/icinga2-stack
