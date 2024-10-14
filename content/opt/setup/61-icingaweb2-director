@@ -91,7 +91,6 @@ done
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config username "${ICINGA2_FEATURE_DIRECTOR_USER}"
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
 
-	icingacli director config deploy
 
 else
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] \

@@ -48,7 +48,7 @@ chown -R www-data:www-data /var/lib/php/sessions
 icingacli module enable icingadb
 
 ini_set /etc/icingaweb2/resources.ini icingadb_db type db
-ini_set /etc/icingaweb2/resources.ini icingadb_db db_type mysql
+ini_set /etc/icingaweb2/resources.ini icingadb_db db mysql
 ini_set /etc/icingaweb2/resources.ini icingadb_db host     "${ICINGA2_DB_MYSQL_HOST}"
 ini_set /etc/icingaweb2/resources.ini icingadb_db port     "${ICINGA2_DB_MYSQL_PORT}"
 ini_set /etc/icingaweb2/resources.ini icingadb_db username "${ICINGA2_DB_MYSQL_USER}"
