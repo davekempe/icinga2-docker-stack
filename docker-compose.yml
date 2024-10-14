@@ -31,6 +31,7 @@ services:
       - ./data/icinga/certs:/etc/apache2/ssl
       - ./data/icinga/etc/icinga2:/etc/icinga2
       - ./data/icinga/etc/icingaweb2:/etc/icingaweb2
+      - ./data/icinga/etc/icingadb:/etc/icingadb
       - ./data/icinga/lib/icinga:/var/lib/icinga2
       - ./data/icinga/lib/php/sessions:/var/lib/php/sessions
       - ./data/icinga/log/apache2:/var/log/apache2
@@ -39,6 +40,7 @@ services:
       - ./data/icinga/log/mysql:/var/log/mysql
       - ./data/icinga/spool:/var/spool/icinga2
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
+      - ./data/icinga/lib/mysql:/var/lib/mysql
       # Sending e-mail
       #  See: https://github.com/jjethwa/icinga2#sending-notification-mails
       #  If you want to enable outbound e-mail, edit the file mstmp/msmtprc
@@ -52,7 +54,6 @@ services:
       - "8080:80"
       - "4443:443"
       - "5665:5665"
-        
 
         #graphite:
         # image: graphiteapp/graphite-statsd:latest
