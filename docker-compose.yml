@@ -1,7 +1,7 @@
 version: '2'
 services:
   icinga2:
-    #image: jordan/icinga2
+    #image: sol1/icinga2-docker-stack
     build:
       context: ./
       dockerfile: Dockerfile
@@ -24,7 +24,7 @@ services:
       #- ICINGAWEB2_ADMIN_USER=icingaadmin
       #- ICINGAWEB2_ADMIN_PASS=icinga
       #- ICINGA2_USER_FULLNAME=Icinga2 Docker Monitoring Instance
-      - DEFAULT_MYSQL_HOST=mysql
+      - DEFAULT_MYSQL_HOST=localhost
     volumes:
       - ./data/icinga/cache:/var/cache/icinga2
       - ./data/icinga/certs:/etc/apache2/ssl
@@ -65,12 +65,12 @@ services:
         # - ./data/graphite/log/carbon:/var/log/carbon
 
 
-  mysql:
-    image: mariadb
-    container_name: mysql
-    env_file:
-      - secrets_sql.env
-    volumes:
-      - ./data/mysql/data:/var/lib/mysql
+        #  mysql:
+        #    image: mariadb
+        #    container_name: mysql
+        #    env_file:
+        #      - secrets_sql.env
+        #    volumes:
+        #      - ./data/mysql/data:/var/lib/mysql
       # If you have previously used the container's internal DB use:
       #- ./data/icinga/lib/mysql:/var/lib/mysql

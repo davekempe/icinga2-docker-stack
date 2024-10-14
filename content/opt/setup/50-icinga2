@@ -1,22 +1,22 @@
-#!/bin/bash
+#!/bin/bash -x
 
 . /opt/helpers
 
 CNFSUFFIX=icinga2
 mysql_cnf_init_section \
-	"${CNFSUFFIX}" \
-	"${ICINGA2_IDO_MYSQL_HOST}" \
-	"${ICINGA2_IDO_MYSQL_PORT}" \
-	"${ICINGA2_IDO_MYSQL_USER}" \
-	"${ICINGA2_IDO_MYSQL_DATA}" \
-	"${ICINGA2_IDO_MYSQL_PASS}"
+    "${CNFSUFFIX}" \
+    "${ICINGA2_DB_MYSQL_HOST}" \
+    "${ICINGA2_DB_MYSQL_PORT}" \
+    "${ICINGA2_DB_MYSQL_USER}" \
+    "${ICINGA2_DB_MYSQL_DATA}" \
+    "${ICINGA2_DB_MYSQL_PASS}"
 mysql_wait \
-	"${ICINGA2_IDO_MYSQL_HOST}" \
-	"${ICINGA2_IDO_MYSQL_PORT}"
+    "${ICINGA2_DB_MYSQL_HOST}" \
+    "${ICINGA2_DB_MYSQL_PORT}"
 
 if [ ! "$(ls -A /etc/icinga2)" ]; then
-	echo "=> Copying fresh config-files for /etc/icinga2"
-	cp -R /etc/icinga2.dist/* /etc/icinga2/
+    echo "=> Copying fresh config-files for /etc/icinga2"
+    cp -R /etc/icinga2.dist/* /etc/icinga2/
 fi
 
 # chown directories and files that might be coming from volumes
@@ -35,64 +35,78 @@ chown -R nagios:root /etc/icinga2
 # Set log level
 sed -i 's,DAEMON_ARGS=.*,DAEMON_ARGS="-e /var/log/icinga2/icinga2.err -x '$ICINGA2_LOG_LEVEL'",g' /etc/init.d/icinga2
 
-# enable necessary features
-icinga2 feature enable ido-mysql livestatus compatlog command
+# Enable necessary features
+icinga2 feature enable icingadb || echo "=> Feature 'icingadb' already enabled."
 
-#icinga2 API cert - regenerate new private key and certificate when running in a new container
+# Icinga2 API cert - regenerate new private key and certificate when running in a new container
 if [ ! -f "/var/lib/icinga2/certs/$(hostname).key" ]; then
-	icinga2 node setup --master
+    icinga2 node setup --master
 fi
 
 chfn -f "${ICINGA2_USER_FULLNAME}" nagios
 
 # Create MySQL user on localhost or test given connection
 
-if evaluate_boolean "${ICINGA2_IDO_MYSQL_SKIP_DB_CREATION}"; then
-	echo "=> Skipping creating database ${ICINGA2_IDO_MYSQL_DATA}"
+if evaluate_boolean "${ICINGA2_DB_MYSQL_SKIP_DB_CREATION}"; then
+    echo "=> Skipping creating database ${ICINGA2_DB_MYSQL_DATA}"
 else
-	echo "=> Creating database ${ICINGA2_IDO_MYSQL_DATA}"
+    echo "=> Checking if database and user already exist..."
 
-  if [ "${ICINGA2_IDO_MYSQL_HOST}" == "localhost" ]; then
-		mysql_root <<-END
-		  CREATE DATABASE IF NOT EXISTS ${ICINGA2_IDO_MYSQL_DATA};
-		  CREATE USER IF NOT EXISTS '${ICINGA2_IDO_MYSQL_USER}'@'localhost'
-		    IDENTIFIED BY '${ICINGA2_IDO_MYSQL_PASS}';
-		  GRANT ALL
-		    ON ${ICINGA2_IDO_MYSQL_DATA}.*
-		    TO '${ICINGA2_IDO_MYSQL_USER}'@'localhost';
-		END
-  elif [ -n "${MYSQL_ROOT_PASSWORD:-}" ]; then
-		mysql_root <<-END
-		  CREATE DATABASE IF NOT EXISTS ${ICINGA2_IDO_MYSQL_DATA};
-		  CREATE USER IF NOT EXISTS '${ICINGA2_IDO_MYSQL_USER}'@'%'
-		    IDENTIFIED BY '${ICINGA2_IDO_MYSQL_PASS}';
-		  GRANT ALL
-		    ON ${ICINGA2_IDO_MYSQL_DATA}.*
-		    TO '${ICINGA2_IDO_MYSQL_USER}'@'%';
-		END
-  fi
+
+	DB_OUTPUT=$(mysql -hlocalhost -e "SHOW DATABASES LIKE '${ICINGA2_DB_MYSQL_DATA}';")
+
+	# Print the output for debugging
+	echo "=> MySQL Output: $DB_OUTPUT"
+
+	# Check if icingadb is in the output
+	if echo "$DB_OUTPUT" | grep -q "icingadb"; then
+	    echo "=> Database icingadb exists."
+	else
+    # If the database doesn't exist, create it
+        echo "=> Database ${ICINGA2_DB_MYSQL_DATA} does not exist. Creating it now..."
+        mysql -hlocalhost <<END_SQL
+CREATE DATABASE ${ICINGA2_DB_MYSQL_DATA};
+CREATE USER IF NOT EXISTS '${ICINGA2_DB_MYSQL_USER}'@'localhost' IDENTIFIED BY '${ICINGA2_DB_MYSQL_PASS}';
+GRANT ALL ON ${ICINGA2_DB_MYSQL_DATA}.* TO '${ICINGA2_DB_MYSQL_USER}'@'localhost';
+FLUSH PRIVILEGES;
+END_SQL
+
+echo "loading icingadb mysql schema"
+        mysql -hlocalhost ${ICINGA2_DB_MYSQL_DATA} < /usr/share/icingadb/schema/mysql/schema.sql >> /var/log/icinga2/mysql-schema.log 2>&1 || true
+
+        if [ $? -ne 0 ]; then
+            echo "Error creating database or user."
+            exit 1
+        fi
+    fi
 fi
 
-mysql_test_credentials
 
-mysql_user \
-	< /usr/share/icinga2-ido-mysql/schema/mysql.sql \
-	>> /var/log/icinga2/mysql-schema.log \
-	2>&1 || true
+echo "
+database:
+  # Database host or absolute Unix socket path.
+  host: localhost
 
-cat > /etc/icinga2/features-available/ido-mysql.conf <<-END
-/**
- * The db_ido_mysql library implements IDO functionality
- * for MySQL.
- */
+  # Database name.
+  database: ${ICINGA2_DB_MYSQL_DATA}
 
-library "db_ido_mysql"
+  # Database user.
+  user: ${ICINGA2_DB_MYSQL_USER}
 
-object IdoMysqlConnection "ido-mysql" {
-  user     = "${ICINGA2_IDO_MYSQL_USER}"
-  password = "${ICINGA2_IDO_MYSQL_PASS}"
-  host     = "${ICINGA2_IDO_MYSQL_HOST}"
-  port     =  ${ICINGA2_IDO_MYSQL_PORT}
-  database = "${ICINGA2_IDO_MYSQL_DATA}"
+  # Database password.
+  password: ${ICINGA2_DB_MYSQL_PASS}
+
+redis:
+  host: localhost " > /etc/icingadb/config.yml
+
+
+cat > /etc/icinga2/features-available/icingadb.conf <<END_CONF
+object IcingaDB "icingadb" {
+  host = "localhost"
+  port = 6380
+  #password = "${ICINGA2_REDIS_PASSWORD}"
 }
-END
+END_CONF
+
+exit 0
+

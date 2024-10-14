@@ -72,7 +72,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt-get install -y --install-recommends \
     icinga2 \
-    icinga2-ido-mysql \
     icingacli \
     icingaweb2 \
     monitoring-plugins \
@@ -82,12 +81,11 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     libmonitoring-plugin-perl \
     icinga-director \
     icinga-graphite \
-    icinga-notifications \ 
+    icinga-notifications \
     icinga-notifications-web \
-    icingadb \ 
+    icingadb \
     icingadb-web \
-    icingadb-redis \
-    icinga-x509 \
+    icingadb-redis\
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

@@ -3,7 +3,7 @@
 . /opt/helpers
 
 # exit, if no service requires local MySQL
-{  [ "${ICINGA2_IDO_MYSQL_HOST}"         == "localhost" ] \
+{  [ "${ICINGA2_DB_MYSQL_HOST}"         == "localhost" ] \
 || [ "${ICINGAWEB2_MYSQL_HOST}"          == "localhost" ] \
 || [ "${ICINGAWEB2_DIRECTOR_MYSQL_HOST}" == "localhost" ]
 } || exit 0

@@ -1,0 +1,67 @@
+#!/bin/bash
+
+. /opt/helpers
+echo "Checking ini_set existence before execution"
+ls -l /usr/local/bin/ini_set || echo "ini_set not found"
+
+
+CNFSUFFIX=icingadb
+mysql_cnf_init_section \
+	"${CNFSUFFIX}" \
+	"${ICINGAWEB2_MYSQL_HOST}" \
+	"${ICINGAWEB2_MYSQL_PORT}" \
+	"${ICINGAWEB2_MYSQL_USER}" \
+	"${ICINGAWEB2_MYSQL_DATA}" \
+	"${ICINGAWEB2_MYSQL_PASS}"
+mysql_wait \
+	"${ICINGAWEB2_MYSQL_HOST}" \
+	"${ICINGAWEB2_MYSQL_PORT}"
+
+if [ ! -f /etc/icingaweb2/resources.ini ]; then
+	echo "=> Copying fresh config-files for /etc/icingaweb2"
+	mkdir -p /etc/icingaweb2
+	cp -R /etc/icingaweb2.dist/* /etc/icingaweb2/
+fi
+
+chown -R www-data:icingaweb2 /etc/icingaweb2
+# chown directories and files that might be coming from volumes
+chmod 2770 /etc/icingaweb2
+
+# https://github.com/jjethwa/icinga2/issues/175
+chmod o-r /etc/icingaweb2/resources.ini
+
+mkdir -p /etc/icingaweb2/modules/icingadb
+touch /etc/icingaweb2/modules/icingadb/config.ini
+touch /etc/icingaweb2/modules/icingadb/redis.ini
+
+chown -R www-data:icingaweb2 /etc/icingaweb2
+# chown directories and files that might be coming from volumes
+chmod 2770 /etc/icingaweb2
+
+mkdir -p /var/log/icingaweb2
+chown -R www-data:adm /var/log/icingaweb2
+
+mkdir -p /var/lib/php/sessions
+chown -R www-data:www-data /var/lib/php/sessions
+
+# enable modules
+icingacli module enable icingadb
+
+ini_set /etc/icingaweb2/resources.ini icingadb_db type db
+ini_set /etc/icingaweb2/resources.ini icingadb_db db_type mysql
+ini_set /etc/icingaweb2/resources.ini icingadb_db host     "${ICINGA2_DB_MYSQL_HOST}"
+ini_set /etc/icingaweb2/resources.ini icingadb_db port     "${ICINGA2_DB_MYSQL_PORT}"
+ini_set /etc/icingaweb2/resources.ini icingadb_db username "${ICINGA2_DB_MYSQL_USER}"
+ini_set /etc/icingaweb2/resources.ini icingadb_db password "${ICINGA2_DB_MYSQL_PASS}"
+ini_set /etc/icingaweb2/resources.ini icingadb_db dbname   "${ICINGA2_DB_MYSQL_DATA}"
+
+ini_set /etc/icingaweb2/modules/icingadb/config.ini icingadb resource icingadb_db
+ini_set /etc/icingaweb2/modules/icingadb/redis.ini redis1 host localhost
+#ini_set /etc/icingaweb2/modules/icingadb/redis.ini redis1 password "${ICINGA2_REDIS_PASSWORD}"
+
+
+# Write Icingaweb2 user and password to installation
+ini_set /etc/icingaweb2/roles.ini Administrators users "${ICINGAWEB2_ADMIN_USER}"
+mysql_user <<-END
+  INSERT IGNORE INTO icingaweb_user (name, active, password_hash) VALUES ('${ICINGAWEB2_ADMIN_USER}', 1, '${ICINGAWEB2_ADMIN_PASS_HASH}');
+END

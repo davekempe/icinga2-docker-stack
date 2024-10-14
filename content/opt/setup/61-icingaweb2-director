@@ -17,6 +17,7 @@ mysql_wait \
 if evaluate_boolean "${ICINGA2_FEATURE_DIRECTOR}"; then
 
 	icingacli module enable director
+	icingacli module enable netbox
 
 	# Create MySQL user on localhost or test given connection
 	if evaluate_boolean "${ICINGAWEB2_DIRECTOR_MYSQL_SKIP_DB_CREATION}"; then
@@ -66,12 +67,31 @@ if evaluate_boolean "${ICINGA2_FEATURE_DIRECTOR}"; then
 	}
 	END
 
+
+# Change directory to the Icinga baskets folder
+cd /usr/share/icingaweb2/modules/netbox/doc/baskets || exit
+
+# Create the temporary directory
+mkdir -p /tmp/basket-import
+
+# Loop through all JSON files in the current directory
+for file in *.json; do
+    # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
+    sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" > "/tmp/basket-import/$file"
+
+    # Run the Icinga Director basket restore command
+    icingacli director basket restore < "/tmp/basket-import/$file"
+done
+
+
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] && \
 		ln -sT /tmp/icinga2-api-user.conf /etc/icinga2/conf.d/api-user.conf
 
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config endpoint "$(hostname --fqdn)"
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config username "${ICINGA2_FEATURE_DIRECTOR_USER}"
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
+
+	icingacli director config deploy
 
 else
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] \

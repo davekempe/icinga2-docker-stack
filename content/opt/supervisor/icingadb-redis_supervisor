@@ -1,0 +1,8 @@
+#!/bin/bash
+
+sleep 20 && /usr/bin/icingadb-redis-server /etc/icingadb-redis/icingadb-redis.conf &
+
+# Allow any signal which would kill a process to stop server
+trap "pkill --f icingadb-redis-server" HUP INT QUIT ABRT ALRM TERM TSTP
+
+while pgrep -u root -f icingadb-redis-server > /dev/null; do sleep 5; done
