@@ -48,7 +48,7 @@ Clone the repository and create a file `secrets_sql.env`, which contains the `MY
     echo "MYSQL_ROOT_PASSWORD=<password>" > secrets_sql.env
     docker compose up
 
-This boots up an icinga(web)2 container with another MySQL container reachable on [http://localhost](http://localhost) with the default credentials *icingaadmin*:*icinga*.
+This boots up an icinga(web)2 container with built in MySQL reachable on [http://localhost:8080](http://localhost:8080) with the default credentials *icingaadmin*:*icinga*.
 
 ### Persistence
 
@@ -62,7 +62,7 @@ This is particularly important when using the /var/lib/mysql volume or an extern
 
 ## Icinga Web 2
 
-Icinga Web 2 can be accessed at [http://localhost/icingaweb2](http://localhost/icingaweb2) with the credentials *icingaadmin*:*icinga* (if not set differently via variables).  When using a volume for /etc/icingaweb2, make sure to set ICINGAWEB2_ADMIN_USER and ICINGAWEB2_ADMIN_PASS
+Icinga Web 2 can be accessed at [http://localhost:8080/icingaweb2](http://localhost:8080/icingaweb2) with the credentials *icingaadmin*:*icinga* (if not set differently via variables).  When using a volume for /etc/icingaweb2, make sure to set ICINGAWEB2_ADMIN_USER and ICINGAWEB2_ADMIN_PASS
 
 ### Saving PHP Sessions
 
