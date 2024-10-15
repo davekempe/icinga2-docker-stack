@@ -1,10 +1,10 @@
 version: '2'
 services:
   icinga2:
-    #image: sol1/icinga2-stack
-    build:
-      context: ./
-      dockerfile: Dockerfile
+    image: sol1/icinga2-stack
+      #build:
+      #context: ./
+      #dockerfile: Dockerfile
     restart: on-failure:5
     # Set your hostname to the FQDN under which your
     # sattelites will reach this container
