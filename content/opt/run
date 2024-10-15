@@ -78,5 +78,19 @@ END
 icinga2 daemon --validate
 
 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf -n &
-trap "supervisorctl shutdown && wait" SIGTERM
-wait
+supervisor_pid=$!  
+
+# wait 40 seconds and then run extra scripts
+(
+  sleep 40
+  # Place your script or command here
+  echo "Supervisor has been running for 40 seconds, now executing script..."
+  # extra onetime scripts to import data - need to be idempotent
+  /opt/onetime/import-baskets
+) &
+
+# Trap SIGTERM to gracefully shut down supervisord
+trap "supervisorctl shutdown && wait $supervisor_pid" SIGTERM
+
+wait $supervisor_pid  
+

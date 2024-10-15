@@ -1,0 +1,35 @@
+{
+    "DirectorJob": {
+        "Import All": {
+            "disabled": "n",
+            "job_class": "Icinga\\Module\\Director\\Job\\ImportJob",
+            "job_name": "Import All",
+            "run_interval": "60",
+            "settings": {
+                "source_id": "__ALL__",
+                "run_import": "y"
+            }
+        },
+        "Sync All": {
+            "disabled": "n",
+            "job_class": "Icinga\\Module\\Director\\Job\\SyncJob",
+            "job_name": "Sync All",
+            "run_interval": "30",
+            "settings": {
+                "rule_id": "__ALL__",
+                "apply_changes": true
+            }
+        },
+        "Deploy": {
+            "disabled": "n",
+            "job_class": "Icinga\\Module\\Director\\Job\\ConfigJob",
+            "job_name": "Deploy",
+            "run_interval": "60",
+            "settings": {
+                "deploy_when_changed": "y",
+                "force_generate": "n",
+                "grace_period": "30"
+            }
+        }
+    }
+}

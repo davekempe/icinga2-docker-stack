@@ -1,10 +1,10 @@
 version: '2'
 services:
   icinga2:
-    image: sol1/icinga2-stack
-    #build:
-    #  context: ./
-    #  dockerfile: Dockerfile
+    #image: sol1/icinga2-stack
+    build:
+      context: ./
+      dockerfile: Dockerfile
     restart: on-failure:5
     # Set your hostname to the FQDN under which your
     # sattelites will reach this container
@@ -19,7 +19,9 @@ services:
       - ICINGA2_FEATURE_GRAPHITE_HOST=graphite
       - ICINGA2_FEATURE_GRAPHITE_PORT=2003
       - ICINGA2_FEATURE_GRAPHITE_URL=http://graphite
-      - NETBOX_URL=http://netbox/api
+      # put these in secrets_sql.env
+      #- NETBOX_URL=http://netbox/api
+      #- NETBOX_APIKEY=1234567890
       # - ICINGA2_FEATURE_GRAPHITE_SEND_THRESHOLDS=true
       # - ICINGA2_FEATURE_GRAPHITE_SEND_METADATA=false
       #- ICINGAWEB2_ADMIN_USER=icingaadmin
