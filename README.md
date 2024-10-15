@@ -46,7 +46,7 @@ Clone the repository and create a file `secrets_sql.env`, which contains the `MY
     git clone https://github.com/davekempe/icinga2-docker-stack.git
     cd icinga2-docker-stack
     echo "MYSQL_ROOT_PASSWORD=<password>" > secrets_sql.env
-    docker-compose up
+    docker compose up
 
 This boots up an icinga(web)2 container with another MySQL container reachable on [http://localhost](http://localhost) with the default credentials *icingaadmin*:*icinga*.
 
