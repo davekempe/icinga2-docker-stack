@@ -1,16 +1,28 @@
 {
     "NotificationTemplate": {
-        "Notification States and Types": {
+        "Notification States and Types Service": {
             "fields": [],
-            "object_name": "Notification States and Types",
+            "object_name": "Notification States and Types Service",
             "object_type": "template",
             "states": [
                 "Critical",
-                "Down",
                 "OK",
                 "Unknown",
-                "Up",
                 "Warning"
+            ],
+            "types": [
+                "Acknowledgement",
+                "Problem",
+                "Recovery"
+            ]
+        },
+        "Notification States and Types Host": {
+            "fields": [],
+            "object_name": "Notification States and Types Host",
+            "object_type": "template",
+            "states": [
+                "Down",
+                "Up"
             ],
             "types": [
                 "Acknowledgement",
@@ -26,7 +38,7 @@
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
                 "apitoken": "1234567890",
-                "baseurl": "http://netbox.example.com/api",
+                "baseurl": "http://103.99.101.201:8001/api",
                 "filter": "",
                 "flatten": "",
                 "flattenkeys": "",
@@ -46,7 +58,7 @@
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
                 "apitoken": "1234567890",
-                "baseurl": "http://netbox.example.com/api",
+                "baseurl": "http://103.99.101.201:8001/api",
                 "filter": "",
                 "flatten": "",
                 "flattenkeys": "",
@@ -66,7 +78,7 @@
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
                 "apitoken": "1234567890",
-                "baseurl": "http://netbox.example.com/api",
+                "baseurl": "http://103.99.101.201:8001/api",
                 "filter": "",
                 "flatten": "",
                 "flattenkeys": "",
@@ -86,7 +98,7 @@
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
                 "apitoken": "1234567890",
-                "baseurl": "http://netbox.example.com/api",
+                "baseurl": "http://103.99.101.201:8001/api",
                 "filter": "",
                 "flatten": "",
                 "flattenkeys": "",
@@ -106,7 +118,7 @@
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
                 "apitoken": "1234567890",
-                "baseurl": "http://netbox.example.com/api",
+                "baseurl": "http://103.99.101.201:8001/api",
                 "filter": "",
                 "flatten": "",
                 "flattenkeys": "",
@@ -188,7 +200,7 @@
                     "merge_policy": "override",
                     "priority": "2",
                     "source": "Netbox Contacts Enhanced Email (Host Assignment)",
-                    "source_expression": "Notification States and Types"
+                    "source_expression": "Notification States and Types Host"
                 },
                 {
                     "destination_field": "import",
@@ -253,7 +265,7 @@
                     "merge_policy": "override",
                     "priority": "2",
                     "source": "Netbox Contacts Enhanced Email (Service Assignment)",
-                    "source_expression": "Notification States and Types"
+                    "source_expression": "Notification States and Types Service"
                 },
                 {
                     "destination_field": "import",
@@ -318,7 +330,7 @@
                     "merge_policy": "override",
                     "priority": "2",
                     "source": "Netbox Contacts Pushover (Host Assignment)",
-                    "source_expression": "Notification States and Types"
+                    "source_expression": "Notification States and Types Host"
                 },
                 {
                     "destination_field": "import",
@@ -383,7 +395,7 @@
                     "merge_policy": "override",
                     "priority": "2",
                     "source": "Netbox Contacts Pushover (Service Assignment)",
-                    "source_expression": "Notification States and Types"
+                    "source_expression": "Notification States and Types Service"
                 },
                 {
                     "destination_field": "import",
