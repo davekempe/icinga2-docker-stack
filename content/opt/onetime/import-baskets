@@ -57,10 +57,11 @@ else
     done
 
 	echo "configuring notification scripts"
-	sed -e 's/"from_address": ".*"/"from_address": "sol1icinga@gmail.com"/' \
-    -e 's|"url": "http://icinga.domain.local/icingaweb2"|"url": "http://${MY_EXTERNAL_IP}:${ICINGA_PORT}/icingaweb2"|' \
-    -e 's|"url": ""|"url": "${NETBOX_URL}"|' \
-    -e 's|"token": "abcdefghijklmnopqrstuvwxyz1234567890"|"token": "${NETBOX_APIKEY}"|' \
+	mkdir -p /etc/icinga2/scripts/config/
+	sed -e "s/\"from_address\": \".*\"/\"from_address\": \"sol1icinga@gmail.com\"/" \
+    -e "s|\"url\": \"http://icinga.domain.local/icingaweb2\"|\"url\": \"http://${MY_EXTERNAL_IP}:${ICINGA_PORT}/icingaweb2\"|" \
+    -e "s|\"url\": \"\"|\"url\": \"${NETBOX_URL}\"|" \
+    -e "s|\"token\": \"abcdefghijklmnopqrstuvwxyz1234567890\"|\"token\": \"${NETBOX_APIKEY}\"|" \
     /opt/sol1/notifications/src/config/enhanced-mail-notification.json > /etc/icinga2/scripts/config/enhanced-mail-notification.json
 
 	sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD}|" /etc/msmtprc 
