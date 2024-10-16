@@ -81,8 +81,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     libmonitoring-plugin-perl \
     icinga-director \
     icinga-graphite \
-    icinga-notifications \
-    icinga-notifications-web \
     icingadb \
     icingadb-web \
     icingadb-redis\
