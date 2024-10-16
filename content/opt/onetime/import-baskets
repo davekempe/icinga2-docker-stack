@@ -3,6 +3,9 @@
 echo "sleeping for a while to let is startup"
 sleep 20
 
+# config gmail password for sending emails
+sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD}|" /etc/msmtprc 
+
 if icingacli director importsource list | grep -q -E '[0-9]+'; then
     echo "Import sources already exist. Skipping basket import."
 else
@@ -64,7 +67,6 @@ else
     -e "s|\"token\": \"abcdefghijklmnopqrstuvwxyz1234567890\"|\"token\": \"${NETBOX_APIKEY}\"|" \
     /opt/sol1/notifications/src/config/enhanced-mail-notification.json > /etc/icinga2/scripts/config/enhanced-mail-notification.json
 
-	sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD}|" /etc/msmtprc 
 
 
     echo "Basket import completed."
