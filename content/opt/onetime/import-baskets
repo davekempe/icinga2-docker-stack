@@ -51,7 +51,7 @@ else
         icingacli director basket restore < "/tmp/basket-import-extra/$file"
     done
 
-	# notifications baskets
+	# notifications baskets commands
     mkdir -p /tmp/basket-import-notifications
     cd /opt/sol1/notifications/director_baskets
     for file in *.json; do
