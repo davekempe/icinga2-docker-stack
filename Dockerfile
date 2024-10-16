@@ -105,7 +105,7 @@ RUN mkdir -p /opt/sol1/notifications/ \
     # Sol1 enhanced notification scripts
     && cd /opt/sol1/notifications/ \
     && git clone https://github.com/sol1/sol1-icinga-notifications.git .\
-    && ./deploy.sh --all
+    && ./deploy.sh --all\
     && true
 
 
