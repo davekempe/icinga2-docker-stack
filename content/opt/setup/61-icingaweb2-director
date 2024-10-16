@@ -127,6 +127,22 @@ if evaluate_boolean "${ICINGA2_FEATURE_DIRECTOR}"; then
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
 
 
+
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost transport "api"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost host "127.0.0.1"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost port "5665"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost username "${ICINGA2_FEATURE_DIRECTOR_USER}"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
+
+
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink users "*"
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink groups "*"
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink type "icingadb-host-action"
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink target "_blank"
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink url "http://${MY_EXTERNAL_IP}:${NETBOX_PORT}/search/?q=$host.display_name$"
+	ini_set /etc/icingaweb2/modules/navigation/icingadb-host-actions.ini NetboxLink owner "icingaadmin"
+
+
 else
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] \
 		|| rm /etc/icinga2/conf.d/api-user.conf
