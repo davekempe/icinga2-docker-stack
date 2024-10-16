@@ -86,6 +86,11 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     icingadb \
     icingadb-web \
     icingadb-redis\
+    python3-loguru\
+    python3-requests\
+    python3-jinja2\
+    python3-rt\
+    git\
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -95,6 +100,14 @@ RUN mkdir -p /usr/share/icingaweb2/modules/ \
     && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.0.8.1.tar.gz" \
     | tar xz --strip-components=1 --directory=/usr/share/icingaweb2/modules/netbox -f - \
     && true
+
+RUN mkdir -p /opt/sol1/notifications/ \
+    # Sol1 enhanced notification scripts
+    && cd /opt/sol1/notifications/ \
+    && git clone https://github.com/sol1/sol1-icinga-notifications.git .\
+    && ./deploy.sh --all
+    && true
+
 
 ADD content/ /
 RUN chmod +x /usr/local/bin/ini_set \

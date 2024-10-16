@@ -43,14 +43,9 @@ services:
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
       - ./data/icinga/lib/mysql:/var/lib/mysql
       # Sending e-mail
-      #  See: https://github.com/jjethwa/icinga2#sending-notification-mails
-      #  If you want to enable outbound e-mail, edit the file mstmp/msmtprc
-      #  and configure to your corresponding mail setup. The default is a
-      #  Gmail example but msmtp can be used for any MTA configuration.
-      #  Change the aliases in msmtp/aliases to your recipients.
-      #  Then uncomment the rows below
-      # - ./msmtp/msmtprc:/etc/msmtprc:ro
-      # - ./msmtp/aliases:/etc/aliases:ro
+      # Sol1 has setup a gmail account just for this image to send notifications from
+      # This account's password may be changed occasionally, so please reach out to:
+      # icinga@sol1.com.au for an up to date app password
     ports:
       - "8080:80"
       - "4443:443"
