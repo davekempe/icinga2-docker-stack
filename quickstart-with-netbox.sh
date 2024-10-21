@@ -50,6 +50,19 @@ echo
 echo "--- Generating configuration files ---"
 echo
 
+# Create plugin files
+cat <<EOF > plugin_requirements.txt
+slurpit_netbox
+EOF
+
+cat <<EOF > Dockerfile-Plugins
+FROM netboxcommunity/netbox:v4.1-3.0.2
+
+COPY ./plugin_requirements.txt /opt/netbox/
+RUN /opt/netbox/venv/bin/pip install  --no-warn-script-location -r /opt/netbox/plugin_requirements.txt
+EOF
+
+
 cat <<EOF > docker-compose.override.yml
 services:
   netbox:
