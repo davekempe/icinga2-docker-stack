@@ -121,18 +121,11 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-echo
-echo "--- Cloning Icinga2 ---"
-echo
-
-git clone -b master https://github.com/davekempe/icinga2-docker-stack/
-pushd icinga2-docker-stack
 
 echo
 echo "--- Writing configuration ---"
 echo
 
-echo "MYSQL_ROOT_PASSWORD=12345678" > secrets_sql.env
 echo "NETBOX_URL=http://${LAN_IP}:${NETBOX_PORT}/api" >> secrets_sql.env
 echo "NETBOX_APIKEY=1234567890" >> secrets_sql.env
 
@@ -160,24 +153,29 @@ echo
 URL="http://${LAN_IP}:${ICINGA_PORT}"
 TIMEOUT=60  # Timeout in seconds
 
-# Counter for time elapsed
+# ASCII art emojis for spinner
+spinner=("(^_^)" "(^o^)" "(^_^;)" "(>_<)" "(^_^)b" "(T_T)")
+
+# Reset elapsed time
 elapsed=0
 
 # Loop to check if the webpage is available
 while ! curl --output /dev/null --silent --head --fail "$URL"; do
+  # Update the spinner with ASCII art
+  i=$((elapsed % ${#spinner[@]}))
+  printf "\rChecking... ${spinner[$i]} "
+  
   # Sleep for 1 second
   sleep 1
   elapsed=$((elapsed + 1))
-  echo "${elapsed}"
 
   # Check if the timeout has been reached
   if [ "$elapsed" -ge "$TIMEOUT" ]; then
-    echo "Timeout after waiting $TIMEOUT seconds for $URL"
+    echo -e "\n(╯°□°)╯︵ ┻━┻ Timeout after waiting $TIMEOUT seconds for $URL"
     exit 1
   fi
 done
 
-popd
 echo "Icinga is available at http://${LAN_IP}:${ICINGA_PORT}"
 echo "username: icingaadmin"
 echo "password: icinga"
