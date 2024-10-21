@@ -7,6 +7,16 @@ This repository contains the source for the [icinga2](https://www.icinga.org/ici
 Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration
 
 
+## Quickstart
+Just run ./quickstart-with-netbox.sh
+It will pull Netbox and Icinga down and run them. It will tell you the urls and ports and creds at the end of the process.
+
+This is NOT for production use. It has hard coded credentials, no scalability, and is meant to just allow you to get up and running quickly.
+For support for this image and script, please Contact Sol1: https://sol1.com.au and we would love to assist you.
+
+
+
+## Image details
 
 The dockerhub-repository is located at [https://hub.docker.com/r/sol1/icinga2-stack](https://hub.docker.com/r/sol1/icinga2-stack).
 
@@ -14,7 +24,6 @@ This build is automated by push for the git-repo. Just pull it via:
 
     docker pull sol1/icinga2-stack
 
-## Image details
 
 1. Based on debian:bookworm
 1. Key-Features:
