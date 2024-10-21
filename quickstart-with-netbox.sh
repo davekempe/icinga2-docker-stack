@@ -25,6 +25,7 @@ check_port_in_use $ICINGA_PORT
 
 echo "NetBox will be deployed at: http://$LAN_IP:$NETBOX_PORT"
 echo "Icinga will be deployed at: http://$LAN_IP:$ICINGA_PORT"
+export LAN_IP=$LAN_IP
 
 
 # Check if all required environment variables are set
