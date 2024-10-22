@@ -51,6 +51,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     pwgen \
     python3 \
     python3-requests \
+    python3-pynetbox \
     snmp \
     msmtp \
     sudo \
