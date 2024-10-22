@@ -126,7 +126,7 @@ echo
 echo "--- Writing configuration ---"
 echo
 
-echo "NETBOX_URL=http://${LAN_IP}:${NETBOX_PORT}/api" >> secrets_sql.env
+echo "NETBOX_URL=http://${LAN_IP}:${NETBOX_PORT}" >> secrets_sql.env
 echo "NETBOX_APIKEY=1234567890" >> secrets_sql.env
 
 # Remove SSL/TLS
