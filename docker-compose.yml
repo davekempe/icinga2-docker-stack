@@ -23,10 +23,15 @@ services:
       #- NETBOX_APIKEY=1234567890
       # - ICINGA2_FEATURE_GRAPHITE_SEND_THRESHOLDS=true
       # - ICINGA2_FEATURE_GRAPHITE_SEND_METADATA=false
-      #- ICINGAWEB2_ADMIN_USER=icingaadmin
-      #- ICINGAWEB2_ADMIN_PASS=icinga
+      - ICINGAWEB2_ADMIN_USER=icingaadmin
+      - ICINGAWEB2_ADMIN_PASS=icinga
       #- ICINGA2_USER_FULLNAME=Icinga2 Docker Monitoring Instance
       - DEFAULT_MYSQL_HOST=localhost
+      # Sending e-mail
+      # Sol1 has setup a gmail account just for this image to send notifications from
+      # This account's password may be changed occasionally, so please reach out to:
+      # icinga@sol1.com.au for an up to date app password
+      - GMAIL_SMTP_PASSWORD=dupz ofmo bjyc lfku
     volumes:
       - ./data/icinga/cache:/var/cache/icinga2
       - ./data/icinga/certs:/etc/apache2/ssl
@@ -42,13 +47,8 @@ services:
       - ./data/icinga/spool:/var/spool/icinga2
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
       - ./data/icinga/lib/mysql:/var/lib/mysql
-      # Sending e-mail
-      # Sol1 has setup a gmail account just for this image to send notifications from
-      # This account's password may be changed occasionally, so please reach out to:
-      # icinga@sol1.com.au for an up to date app password
     ports:
-      - "8080:80"
-      - "4443:443"
+      - "${ICINGA_PORT}:80"
       - "5665:5665"
 
         #graphite:
