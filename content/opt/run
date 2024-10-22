@@ -87,6 +87,21 @@ supervisor_pid=$!
   echo "Supervisor has been running for 40 seconds, now executing script..."
   # extra onetime scripts to import data - need to be idempotent
   /opt/onetime/import-baskets
+  # Idempotent 
+  STATUS_FILE="/opt/onetime/.netbox_import_done"
+
+  if [ ! -f "$STATUS_FILE" ]; then
+    echo "Running NetBox importer..."
+    if python3 /opt/onetime/netbox-importer.py /opt/onetime/netbox-data.json; then
+      # Only create the file if the import was successful
+      echo "NetBox import successful, marking as done."
+      touch "$STATUS_FILE"
+    else
+      echo "NetBox import failed, not marking as done."
+    fi
+  else
+    echo "NetBox import already done, skipping."
+  fi
 ) &
 
 # Trap SIGTERM to gracefully shut down supervisord
