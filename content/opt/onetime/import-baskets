@@ -34,7 +34,7 @@ else
     	fi
 
         # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
-        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" | \
+        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"/api|" "$file" | \
         sed "s|\"apitoken\": \".*\"|\"apitoken\": \"${NETBOX_APIKEY}\"|" > "/tmp/basket-import/$file"
 
         # Run the Icinga Director basket restore command
@@ -46,7 +46,7 @@ else
     cd /opt/baskets
     for file in *.json; do
         # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
-        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" | \
+        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"/api|" "$file" | \
         sed "s|\"apitoken\": \".*\"|\"apitoken\": \"${NETBOX_APIKEY}\"|" > "/tmp/basket-import-extra/$file"
 
         # Run the Icinga Director basket restore command
