@@ -6,6 +6,9 @@ sleep 20
 # config gmail password for sending emails
 sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD}|" /etc/msmtprc 
 
+sed -i -e "s|root@localhost|sol1icinga@gmail.com|" /etc/icinga2/conf.d/users.conf
+
+
 if icingacli director importsource list | grep -q -E '[0-9]+'; then
     echo "Import sources already exist. Skipping basket import."
 else
