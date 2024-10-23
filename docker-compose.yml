@@ -50,6 +50,7 @@ services:
     ports:
       - "${ICINGA_PORT}:80"
       - "5665:5665"
+      - "8888:8888"
 
         #graphite:
         # image: graphiteapp/graphite-statsd:latest
