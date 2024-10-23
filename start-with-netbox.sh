@@ -10,6 +10,7 @@ check_port_in_use() {
 
 export NETBOX_PORT="8001"
 export ICINGA_PORT="8002"
+export MEERKAT_PORT="8888"
 
 # Attempt to fetch the IPv4 address of the interface with the default gateway
 LAN_IP=$(ip -4 route get 1.1.1.1 | grep -oP 'src \K\S+')
@@ -22,10 +23,13 @@ fi
 
 check_port_in_use $NETBOX_PORT
 check_port_in_use $ICINGA_PORT
+check_port_in_use $MEERKAT_PORT
+
+export LAN_IP=$LAN_IP
 
 echo "NetBox will be deployed at: http://$LAN_IP:$NETBOX_PORT"
 echo "Icinga will be deployed at: http://$LAN_IP:$ICINGA_PORT"
-export LAN_IP=$LAN_IP
+echo "Meerkat will be deployed at: https://$LAN_IP:$MEERKAT_PORT"
 
 
 # Check if all required environment variables are set
@@ -180,6 +184,7 @@ echo "Icinga is available at http://${LAN_IP}:${ICINGA_PORT}"
 echo "username: icingaadmin"
 echo "password: icinga"
 
+echo "Meerkat is available at https://${LAN_IP}:${MEERKAT_PORT}"
 
 echo "you can now access netbox here: http://${LAN_IP}:${NETBOX_PORT}"
 echo "username: admin"
