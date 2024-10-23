@@ -4,11 +4,13 @@
 
 This repository contains the source for the [icinga2](https://www.icinga.org/icinga2/) [docker](https://www.docker.com) image.
 
-Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration
+Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration and even Meerkat.
+
+Yes this has everything in the one container. No, thats not the docker way. The point of this is to make it easy to run a demo instance of all of this great software quickly.
 
 
 ## Quickstart
-Just run ./quickstart-with-netbox.sh
+Just run ./start-with-netbox.sh
 It will pull Netbox and Icinga down and run them. It will tell you the urls and ports and creds at the end of the process.
 
 This is NOT for production use. It has hard coded credentials, no scalability, and is meant to just allow you to get up and running quickly.
