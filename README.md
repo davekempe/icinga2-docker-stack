@@ -10,12 +10,15 @@ Yes this has everything in the one container. No, thats not the docker way. The 
 
 
 ## Quickstart
-Just run ./start-with-netbox.sh
+
+    git clone https://github.com/davekempe/icinga2-docker-stack.git
+    cd icinga2-docker-stack
+    ./start-with-netbox.sh
+
 It will pull Netbox and Icinga down and run them. It will tell you the urls and ports and creds at the end of the process.
 
 This is NOT for production use. It has hard coded credentials, no scalability, and is meant to just allow you to get up and running quickly.
 For support for this image and script, please Contact Sol1: https://sol1.com.au and we would love to assist you.
-
 
 
 ## Image details
@@ -44,7 +47,7 @@ This build is automated by push for the git-repo. Just pull it via:
 1. No SSH. Use docker [exec](https://docs.docker.com/engine/reference/commandline/exec/) or [nsenter](https://github.com/jpetazzo/nsenter)
 1. If passwords are not supplied, they will be randomly generated and shown via stdout.
 
-## Usage
+## Usage 
 
 Start a new container and bind to host's port 80
 
