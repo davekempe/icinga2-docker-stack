@@ -5,6 +5,8 @@ services:
       #context: ./
       #dockerfile: Dockerfile
     restart: on-failure:5
+    networks:
+      - autocon-workshop
     # Set your hostname to the FQDN under which your
     # sattelites will reach this container
     hostname: icinga2
@@ -52,24 +54,6 @@ services:
       - "5665:5665"
       - "8888:8888"
 
-        #graphite:
-        # image: graphiteapp/graphite-statsd:latest
-        #container_name: graphite
-        # restart: on-failure:5
-        #  hostname: graphite
-        #  volumes:
-        #   - ./data/graphite/conf:/opt/graphite/conf
-        #   - ./data/graphite/storage:/opt/graphite/storage
-        #  - ./data/graphite/log/graphite:/var/log/graphite
-        # - ./data/graphite/log/carbon:/var/log/carbon
-
-
-        #  mysql:
-        #    image: mariadb
-        #    container_name: mysql
-        #    env_file:
-        #      - secrets_sql.env
-        #    volumes:
-        #      - ./data/mysql/data:/var/lib/mysql
-      # If you have previously used the container's internal DB use:
-      #- ./data/icinga/lib/mysql:/var/lib/mysql
+networks:
+  autocon-workshop:
+    external: true
