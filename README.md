@@ -4,9 +4,24 @@
 
 This repository contains the source for the [icinga2](https://www.icinga.org/icinga2/) [docker](https://www.docker.com) image.
 
-Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration
+Forked from Jordon's excellent work here and updated with IcingaDB, latest director, packages, Netbox integration and even Meerkat.
+
+Yes this has everything in the one container. No, thats not the docker way. The point of this is to make it easy to run a demo instance of all of this great software quickly.
 
 
+## Quickstart
+
+    git clone https://github.com/davekempe/icinga2-docker-stack.git
+    cd icinga2-docker-stack
+    ./start-with-netbox.sh
+
+It will pull Netbox and Icinga down and run them. It will tell you the urls and ports and creds at the end of the process.
+
+This is NOT for production use. It has hard coded credentials, no scalability, and is meant to just allow you to get up and running quickly.
+For support for this image and script, please Contact Sol1: https://sol1.com.au and we would love to assist you.
+
+
+## Image details
 
 The dockerhub-repository is located at [https://hub.docker.com/r/sol1/icinga2-stack](https://hub.docker.com/r/sol1/icinga2-stack).
 
@@ -14,7 +29,6 @@ This build is automated by push for the git-repo. Just pull it via:
 
     docker pull sol1/icinga2-stack
 
-## Image details
 
 1. Based on debian:bookworm
 1. Key-Features:
@@ -33,7 +47,7 @@ This build is automated by push for the git-repo. Just pull it via:
 1. No SSH. Use docker [exec](https://docs.docker.com/engine/reference/commandline/exec/) or [nsenter](https://github.com/jpetazzo/nsenter)
 1. If passwords are not supplied, they will be randomly generated and shown via stdout.
 
-## Usage
+## Usage 
 
 Start a new container and bind to host's port 80
 
@@ -46,9 +60,9 @@ Clone the repository and create a file `secrets_sql.env`, which contains the `MY
     git clone https://github.com/davekempe/icinga2-docker-stack.git
     cd icinga2-docker-stack
     echo "MYSQL_ROOT_PASSWORD=<password>" > secrets_sql.env
-    docker-compose up
+    docker compose up
 
-This boots up an icinga(web)2 container with another MySQL container reachable on [http://localhost](http://localhost) with the default credentials *icingaadmin*:*icinga*.
+This boots up an icinga(web)2 container with built in MySQL reachable on [http://localhost:8080](http://localhost:8080) with the default credentials *icingaadmin*:*icinga*.
 
 ### Persistence
 
@@ -62,7 +76,7 @@ This is particularly important when using the /var/lib/mysql volume or an extern
 
 ## Icinga Web 2
 
-Icinga Web 2 can be accessed at [http://localhost/icingaweb2](http://localhost/icingaweb2) with the credentials *icingaadmin*:*icinga* (if not set differently via variables).  When using a volume for /etc/icingaweb2, make sure to set ICINGAWEB2_ADMIN_USER and ICINGAWEB2_ADMIN_PASS
+Icinga Web 2 can be accessed at [http://localhost:8080/icingaweb2](http://localhost:8080/icingaweb2) with the credentials *icingaadmin*:*icinga* (if not set differently via variables).  When using a volume for /etc/icingaweb2, make sure to set ICINGAWEB2_ADMIN_USER and ICINGAWEB2_ADMIN_PASS
 
 ### Saving PHP Sessions
 

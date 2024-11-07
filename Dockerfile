@@ -51,6 +51,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     pwgen \
     python3 \
     python3-requests \
+    python3-pynetbox \
     snmp \
     msmtp \
     sudo \
@@ -81,11 +82,14 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     libmonitoring-plugin-perl \
     icinga-director \
     icinga-graphite \
-    icinga-notifications \
-    icinga-notifications-web \
     icingadb \
     icingadb-web \
     icingadb-redis\
+    python3-loguru\
+    python3-requests\
+    python3-jinja2\
+    python3-rt\
+    git\
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -95,6 +99,37 @@ RUN mkdir -p /usr/share/icingaweb2/modules/ \
     && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.0.8.1.tar.gz" \
     | tar xz --strip-components=1 --directory=/usr/share/icingaweb2/modules/netbox -f - \
     && true
+
+# meerkat
+RUN mkdir -p /opt/sol1/meerkat/dl \
+    # Module Netbox
+    && RELEASE_URL=`curl https://api.github.com/repos/meerkat-dashboard/meerkat/releases/latest | jq -r '.assets[0].browser_download_url' || true`\
+    && INSTALL_DIR=/opt/sol1/meerkat\
+    && USER=meerkat\
+    && curl -sL $RELEASE_URL | tar xz -C "$INSTALL_DIR/dl"\
+    && useradd -d "$INSTALL_DIR" -s /usr/sbin/nologin $USER \
+    && mkdir -p "$INSTALL_DIR/dashboards" \
+    && mkdir -p "$INSTALL_DIR/dashboards-background" \
+    && mkdir -p "$INSTALL_DIR/dashboards-sound" \
+    && mkdir -p "$INSTALL_DIR/log" \
+    && cp $INSTALL_DIR/dl/meerkat/meerkat $INSTALL_DIR/meerkat \
+    && chmod +x $INSTALL_DIR/meerkat \
+    && cp $INSTALL_DIR/dl/meerkat/contrib/meerkat.toml.example $INSTALL_DIR/meerkat.toml \
+    && sed -i "s|^HTTPAddr = \"0.0.0.0:8080\"|HTTPAddr = \"0.0.0.0:8888\"|g; s|^#IcingaInsecureTLS = true|IcingaInsecureTLS = true|g" $INSTALL_DIR/meerkat.toml \
+    && "$INSTALL_DIR/dl/meerkat/contrib/generate-ssl.sh" "meerkat" "$INSTALL_DIR/ssl" $INSTALL_DIR/meerkat.toml \
+    && chown -R $USER "$INSTALL_DIR"\
+    && true
+
+
+
+
+RUN mkdir -p /opt/sol1/notifications/ \
+    # Sol1 enhanced notification scripts
+    && cd /opt/sol1/notifications/ \
+    && git clone https://github.com/sol1/sol1-icinga-notifications.git .\
+    && ./deploy.sh --all\
+    && true
+
 
 ADD content/ /
 RUN chmod +x /usr/local/bin/ini_set \
@@ -125,7 +160,7 @@ RUN true \
     /usr/lib/nagios/plugins/check_icmp \
     && /sbin/setcap cap_net_raw+p /bin/ping
 
-EXPOSE 80 443 5665
+EXPOSE 80 443 5665 8888
 
 # Initialize and run Supervisor
 ENTRYPOINT ["/opt/run"]

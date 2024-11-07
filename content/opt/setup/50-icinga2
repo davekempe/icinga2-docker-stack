@@ -30,6 +30,9 @@ chown -R nagios:nagios /var/lib/icinga2
 chown -R nagios:nagios /var/spool/icinga2
 chown -R nagios:nagios /var/cache/icinga2
 
+touch /var/log/msmtp.log
+chown nagios:nagios /var/log/msmtp.log
+
 chown -R nagios:root /etc/icinga2
 
 # Set log level

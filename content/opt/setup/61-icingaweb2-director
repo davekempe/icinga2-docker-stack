@@ -68,20 +68,55 @@ if evaluate_boolean "${ICINGA2_FEATURE_DIRECTOR}"; then
 	END
 
 
-# Change directory to the Icinga baskets folder
-cd /usr/share/icingaweb2/modules/netbox/doc/baskets || exit
+#if icingacli director importsource list | grep -q -E '[0-9]+'; then
+#    echo "Import sources already exist. Skipping basket import."
+#else
+#    echo "No existing import sources found. Proceeding with basket import."
 
-# Create the temporary directory
-mkdir -p /tmp/basket-import
 
-# Loop through all JSON files in the current directory
-for file in *.json; do
-    # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
-    sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" > "/tmp/basket-import/$file"
+#	echo "starting director for kickstart"
+#	#icingacli director daemon run &
+#
+#	sleep 5
+#	
+#	#icingacli director config deploy
+#
 
-    # Run the Icinga Director basket restore command
-    icingacli director basket restore < "/tmp/basket-import/$file"
-done
+#    # Change directory to the Icinga baskets folder
+#    cd /usr/share/icingaweb2/modules/netbox/doc/baskets || exit
+#
+#    # Create the temporary directory
+#    mkdir -p /tmp/basket-import
+#
+#    # Loop through all JSON files in the current directory
+#    for file in *.json; do
+#        # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
+#        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" | \
+#        sed "s|\"apitoken\": \".*\"|\"apitoken\": \"${NETBOX_APIKEY}\"|" > "/tmp/basket-import/$file"
+#
+#        # Run the Icinga Director basket restore command
+#        icingacli director basket restore < "/tmp/basket-import/$file"
+#
+#    done
+#
+#    mkdir -p /tmp/basket-import-extra
+#	cd /opt/baskets
+#    for file in *.json; do
+#        # Use sed to replace the baseurl value and copy the result to /tmp/basket-import
+#        sed "s|\"baseurl\": \".*\"|\"baseurl\": \"${NETBOX_URL}\"|" "$file" | \
+#        sed "s|\"apitoken\": \".*\"|\"apitoken\": \"${NETBOX_APIKEY}\"|" > "/tmp/basket-import-extra/$file"
+#
+#        # Run the Icinga Director basket restore command
+#        icingacli director basket restore < "/tmp/basket-import-extra/$file"
+#    done
+
+
+
+#    echo "Basket import completed."
+#	#kill off director somehow
+#	#pkill --f icinga::director
+
+#fi
 
 
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] && \
@@ -91,6 +126,25 @@ done
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config username "${ICINGA2_FEATURE_DIRECTOR_USER}"
 	ini_set /etc/icingaweb2/modules/director/kickstart.ini config password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
 
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost transport "api"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost host "127.0.0.1"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost port "5665"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost username "${ICINGA2_FEATURE_DIRECTOR_USER}"
+	ini_set /etc/icingaweb2/modules/icingadb/commandtransports.ini localhost password "${ICINGA2_FEATURE_DIRECTOR_PASS}"
+
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink users "*"
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink groups "*"
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink type "icingadb-host-action"
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink target "_blank"
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink url "http://${MY_EXTERNAL_IP}:${NETBOX_PORT}/search/?q=$host.display_name$"
+	ini_set /etc/icingaweb2/navigation/icingadb-host-actions.ini NetboxLink owner "icingaadmin"
+
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat type  "menu-item"
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat target "_blank"
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat url "https://${MY_EXTERNAL_IP}:${MEERKAT_PORT}/"
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat users "*"
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat groups "*"
+	ini_set /etc/icingaweb2/navigation/menu.ini Meerkat owner "icingaadmin"
 
 else
 	[ ! -L /etc/icinga2/conf.d/api-user.conf ] \

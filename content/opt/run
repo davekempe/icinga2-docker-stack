@@ -8,7 +8,6 @@ export ICINGAWEB2_ADMIN_USER=${ICINGAWEB2_ADMIN_USER:-"icingaadmin"}
 export ICINGAWEB2_ADMIN_PASS=${ICINGAWEB2_ADMIN_PASS:-"icinga"}
 export ICINGAWEB2_ADMIN_PASS_HASH=$(openssl passwd -1 "${ICINGAWEB2_ADMIN_PASS}")
 
-export ICINGA2_FEATURE_DIRECTOR_PASS=${ICINGA2_FEATURE_DIRECTOR_PASS:-$(pwgen -s 15 1)}
 
 export DEFAULT_MYSQL_HOST=${DEFAULT_MYSQL_HOST:-mysql}
 export DEFAULT_MYSQL_PORT=${DEFAULT_MYSQL_PORT:-3306}
@@ -18,11 +17,13 @@ export DEFAULT_MYSQL_PASS=${DEFAULT_MYSQL_PASS:-$(pwgen -s 15 1)}
 export MYSQL_ROOT_USER=${MYSQL_ROOT_USER:-root}
 
 
+export ICINGA2_FEATURE_DIRECTOR_PASS=${ICINGA2_FEATURE_DIRECTOR_PASS:-${DEFAULT_MYSQL_PASS}}
+
 export ICINGA2_DB_MYSQL_HOST=${ICINGA2_DB_MYSQL_HOST:-${DEFAULT_MYSQL_HOST}}
 export ICINGA2_DB_MYSQL_PORT=${ICINGA2_DB_MYSQL_PORT:-${DEFAULT_MYSQL_PORT}}
 export ICINGA2_DB_MYSQL_USER=${ICINGA2_DB_MYSQL_USER:-icingadb}
 export ICINGA2_DB_MYSQL_DATA=${ICINGA2_DB_MYSQL_DATA:-icingadb}
-export ICINGA2_DB_MYSQL_PASS=${ICINGA2_DB_MYSQL_PASS:-$(pwgen -s 15 1)}
+export ICINGA2_DB_MYSQL_PASS=${ICINGA2_DB_MYSQL_PASS:-${DEFAULT_MYSQL_PASS}}
 export ICINGA2_DB_MYSQL_SKIP_DB_CREATION=${ICINGA2_DB_MYSQL_SKIP_DB_CREATION:-false}
 
 
@@ -77,5 +78,34 @@ END
 icinga2 daemon --validate
 
 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf -n &
-trap "supervisorctl shutdown && wait" SIGTERM
-wait
+supervisor_pid=$!  
+
+# wait 40 seconds and then run extra scripts
+(
+  sleep 40
+  # Place your script or command here
+  echo "Supervisor has been running for 40 seconds, now executing script..."
+  # extra onetime scripts to import data - need to be idempotent
+  /opt/onetime/import-baskets
+  # Idempotent 
+  STATUS_FILE="/opt/onetime/.netbox_import_done"
+
+  if [ ! -f "$STATUS_FILE" ]; then
+    echo "Running NetBox importer..."
+    if python3 /opt/onetime/netbox-importer.py --url ${NETBOX_URL} --token ${NETBOX_APIKEY} --file /opt/onetime/netbox-data.json; then
+      # Only create the file if the import was successful
+      echo "NetBox import successful, marking as done."
+      touch "$STATUS_FILE"
+    else
+      echo "NetBox import failed, not marking as done."
+    fi
+  else
+    echo "NetBox import already done, skipping."
+  fi
+) &
+
+# Trap SIGTERM to gracefully shut down supervisord
+trap "supervisorctl shutdown && wait $supervisor_pid" SIGTERM
+
+wait $supervisor_pid  
+

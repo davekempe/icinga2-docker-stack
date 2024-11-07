@@ -1,9 +1,9 @@
 services:
   icinga2:
     image: sol1/icinga2-stack
-    #build:
-    #  context: ./
-    #  dockerfile: Dockerfile
+      #build:
+      #context: ./
+      #dockerfile: Dockerfile
     restart: on-failure:5
     # Set your hostname to the FQDN under which your
     # sattelites will reach this container
@@ -18,18 +18,26 @@ services:
       - ICINGA2_FEATURE_GRAPHITE_HOST=graphite
       - ICINGA2_FEATURE_GRAPHITE_PORT=2003
       - ICINGA2_FEATURE_GRAPHITE_URL=http://graphite
-      - NETBOX_URL=http://netbox/api
+      # put these in secrets_sql.env
+      #- NETBOX_URL=http://netbox/api
+      #- NETBOX_APIKEY=1234567890
       # - ICINGA2_FEATURE_GRAPHITE_SEND_THRESHOLDS=true
       # - ICINGA2_FEATURE_GRAPHITE_SEND_METADATA=false
-      #- ICINGAWEB2_ADMIN_USER=icingaadmin
-      #- ICINGAWEB2_ADMIN_PASS=icinga
+      - ICINGAWEB2_ADMIN_USER=icingaadmin
+      - ICINGAWEB2_ADMIN_PASS=icinga
       #- ICINGA2_USER_FULLNAME=Icinga2 Docker Monitoring Instance
       - DEFAULT_MYSQL_HOST=localhost
+      # Sending e-mail
+      # Sol1 has setup a gmail account just for this image to send notifications from
+      # This account's password may be changed occasionally, so please reach out to:
+      # icinga@sol1.com.au for an up to date app password
+      - GMAIL_SMTP_PASSWORD=dupz ofmo bjyc lfku
     volumes:
       - ./data/icinga/cache:/var/cache/icinga2
       - ./data/icinga/certs:/etc/apache2/ssl
       - ./data/icinga/etc/icinga2:/etc/icinga2
       - ./data/icinga/etc/icingaweb2:/etc/icingaweb2
+      - ./data/icinga/etc/icingadb:/etc/icingadb
       - ./data/icinga/lib/icinga:/var/lib/icinga2
       - ./data/icinga/lib/php/sessions:/var/lib/php/sessions
       - ./data/icinga/log/apache2:/var/log/apache2
@@ -39,21 +47,10 @@ services:
       - ./data/icinga/spool:/var/spool/icinga2
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
       - ./data/icinga/lib/mysql:/var/lib/mysql
-
-      # Sending e-mail
-      #  See: https://github.com/jjethwa/icinga2#sending-notification-mails
-      #  If you want to enable outbound e-mail, edit the file mstmp/msmtprc
-      #  and configure to your corresponding mail setup. The default is a
-      #  Gmail example but msmtp can be used for any MTA configuration.
-      #  Change the aliases in msmtp/aliases to your recipients.
-      #  Then uncomment the rows below
-      # - ./msmtp/msmtprc:/etc/msmtprc:ro
-      # - ./msmtp/aliases:/etc/aliases:ro
     ports:
-      - "8080:80"
-      - "4443:443"
+      - "${ICINGA_PORT}:80"
       - "5665:5665"
-        
+      - "8888:8888"
 
         #graphite:
         # image: graphiteapp/graphite-statsd:latest
