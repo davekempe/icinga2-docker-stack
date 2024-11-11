@@ -84,7 +84,7 @@
     },
     "ImportSource": {
         "Netbox Default Virtual Machines": {
-            "key_column": "keyid",
+            "key_column": "name",
             "modifiers": [],
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
@@ -104,7 +104,7 @@
             "source_name": "Netbox Default Virtual Machines"
         },
         "Netbox Default Devices": {
-            "key_column": "keyid",
+            "key_column": "name",
             "modifiers": [],
             "provider_class": "Icinga\\Module\\Netbox\\ProvidedHook\\Director\\ImportSource",
             "settings": {
@@ -131,7 +131,7 @@
                     "merge_policy": "override",
                     "priority": "1",
                     "source": "Netbox Default Virtual Machines",
-                    "source_expression": "${keyid}"
+                    "source_expression": "${name}"
                 },
                 {
                     "destination_field": "import",
@@ -275,7 +275,7 @@
                     "merge_policy": "override",
                     "priority": "1",
                     "source": "Netbox Default Devices",
-                    "source_expression": "${keyid}"
+                    "source_expression": "${name}"
                 },
                 {
                     "destination_field": "import",
