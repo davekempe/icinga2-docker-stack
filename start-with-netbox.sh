@@ -130,8 +130,25 @@ echo
 echo "--- Writing configuration ---"
 echo
 
-echo "NETBOX_URL=http://${LAN_IP}:${NETBOX_PORT}" >> secrets_sql.env
-echo "NETBOX_APIKEY=1234567890" >> secrets_sql.env
+# Check if secrets_sql.env exists; if not, create it
+if [ ! -f secrets_sql.env ]; then
+  # Generate random passwords for MYSQL_ROOT_PASSWORD and DEFAULT_MYSQL_PASS
+  MYSQL_ROOT_PASSWORD=$(openssl rand -base64 16| tr -d /=+ | cut -c -30)
+  DEFAULT_MYSQL_PASS=$(openssl rand -base64 16| tr -d /=+ | cut -c -30)
+
+  # Write the environment variables to secrets_sql.env
+  {
+    echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}"
+    echo "DEFAULT_MYSQL_PASS=${DEFAULT_MYSQL_PASS}"
+    echo "NETBOX_URL=http://${LAN_IP}:${NETBOX_PORT}"
+    echo "NETBOX_APIKEY=1234567890"
+    echo "MEERKAT_PORT=${MEERKAT_PORT}"
+  } >> secrets_sql.env
+
+  echo "secrets_sql.env created with generated passwords."
+else
+  echo "secrets_sql.env already exists. Skipping creation."
+fi
 
 # Remove SSL/TLS
 sed -i '/4443:443/d' docker-compose.yml
