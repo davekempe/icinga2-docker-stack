@@ -1,0 +1,796 @@
+#!/usr/bin/perl -w
+
+# Monitoring plugin for Icinga for Isilon
+
+# debian package dependencies: libjson-perl libmonitoring-plugin-perl
+
+use constant VERSION => '1.0';
+
+use constant CACHE_DISABLED => 0;
+
+use strict;
+
+
+my @ISILON_EVENTS_CRITICAL = qw(
+    HW_INFINITY_DIMM_FAULT
+    HW_INFINITY_BATTERY_BACKUP_FAULT
+    HW_NVRAM_NVDIMM_FAILED
+    HW_NVRAM_NVDIMM_PERSISTENCE_LOSS
+    NODE_STATUS_OFFLINE
+);
+my @ISILON_EVENTS_WARNING = qw(
+    WINNET_AUTH_AD_SPN_MISSING
+    SW_FIRMWARE_UPDATE_FAILED
+    NODE_INTERNAL_LINK_DOWN
+    REBOOT_NODE_REBOOT
+    NODE_BE_SWITCH_MGMT_SERVICE
+);
+
+#use Time::HiRes; # for logging maybe
+use JSON;
+use LWP::UserAgent;
+use Data::Dumper;
+$Data::Dumper::Sortkeys = 1;
+use Monitoring::Plugin;
+
+my $HOSTNAME = `hostname`;
+chomp $HOSTNAME;
+
+my ( $ELEMENT, $SERVICE ) = ();
+
+my $P = Monitoring::Plugin->new(
+    usage   => "Usage: %s [ -v|--verbose ] [-d|--debug <level>] -C <check>)",
+    version => VERSION,
+    blurb   =>
+      "Contacts Isilon via API and retrieves the data for the requested check",
+    shortname => ' ',
+);
+
+my @extra = ();
+
+# threshold alert things
+my @LEVELS = qw(warn critical);
+my @DIRS   = qw(above below);
+my @THINGS = qw(free-bytes free-pct avail-bytes avail-pct);
+
+foreach my $level (@LEVELS) {
+    foreach my $dir (@DIRS) {
+        foreach my $thing (@THINGS) {
+            $P->add_arg(
+                spec => "$level-$thing-$dir=s",
+                help =>
+"If the $thing is $dir the given argument then alert at $level level",
+            );
+        }
+    }
+}
+
+# CHECKS - code and doc in byte-sized pieces
+my %CHECKS = (
+    Alive => {
+        doc  => "The cluster or node is alive",
+        code => sub {
+            my $id = eval { &is('/platform/1/cluster/identity') };
+            my $ok = 0;
+            if ($id) {
+                foreach my $thing (qw(Name Description)) {
+                    if ( $id->{ lc($thing) } ) {
+                        $P->add_message( OK,
+                            "Cluster $thing is $id->{lc($thing)}" );
+                        $ok = 1;
+                    }
+                }
+            }
+            if ( !$ok ) {
+                $P->add_message( CRITICAL, "Cluster not responding" );
+            }
+            if ( my $node = $P->opts->node ) {
+                my $hw = &is("/platform/10/cluster/nodes/$node/hardware/");
+                if ( my $p = $hw->{nodes}->[0]->{product} ) {
+                    $P->add_message( OK, "Node $node is a '$p'" );
+                }
+                else {
+                    $P->add_message( CRITICAL,
+                        "API doesn't know about Node $node" );
+                }
+            }
+        },
+    },
+    Storage => {
+        doc =>
+          "Report/check on storage at node or cluster / tier / pool levels",
+        code => sub {
+
+            # cluster stats
+            my @stats = qw(
+              cluster.disk.xfers.in.rate
+              cluster.disk.xfers.out.rate
+              cluster.disk.bytes.in.rate
+              cluster.disk.bytes.out.rate
+            );
+
+            # node check has different stats
+            if ( my $node = $P->opts->node ) {
+                @stats = ();
+
+                push @stats, "node.disk.ifs.bytes.$_.all"
+                  foreach qw(total free);
+                push @stats, "node.disk.ifs.inodes.used.all";
+
+                push @stats, qw(
+                  node.disk.bytes.in.rate.avg
+                  node.disk.bytes.out.rate.avg
+                  node.disk.latencies
+                  node.disk.busy.all
+                  node.disk.iosched.queue.all
+                );
+                foreach my $part (qw(root var varcrash)) {
+                    foreach my $x (qw(bytes percent)) {
+                        foreach my $y (qw(avail used free total)) {
+                            next if $x eq 'percent' and $y eq 'total';
+                            push @stats, "node.sysfs.$part.$x.$y";
+                        }
+                    }
+                }
+            }
+            &stats( node => $P->opts->node, stats => [@stats] );
+
+            return if $P->opts->node;
+
+            # only cluster stuff below
+
+            my $c             = &is('/platform/1/cluster/statfs');
+            my $p             = &is('/platform/1/storagepool/storagepools');
+            my %p             = ();
+            my $size          = $c->{f_blocks} * $c->{f_bsize};
+            my $cluster_usage = {
+                avail_bytes => $c->{f_bavail} * $c->{f_bsize},
+                free_bytes  => $c->{f_bfree} * $c->{f_bsize},
+                total_bytes => $c->{f_blocks} * $c->{f_bsize},
+            };
+            &usage_stats($cluster_usage);
+            my $tb = $size / ( 1024**4 );
+            my $Tb = $size / ( 1000**4 );
+            $P->add_message( OK,
+                sprintf( "Cluster size is %d TB (%d Tebibytes)", $Tb, $tb ) );
+
+            foreach my $pool ( @{ $p->{storagepools} } ) {
+                &usage_stats( $pool->{usage} );
+                $p{ $pool->{name} } = $pool;
+            }
+
+            foreach my $pool ( @{ $p->{storagepools} } ) {
+                my $desc = ucfirst( $pool->{type} ) . " $pool->{name}";
+                my $u    = $pool->{usage};
+                $P->add_message( OK,
+                    sprintf(
+                        "%s (%s Total, %.2f%% = %s Free, %.2f%% = %s Available)",
+                        $desc,          $u->{total_human},
+                        $u->{free_pct}, $u->{free_human},
+                        $u->{avail_pct}, $u->{avail_human}
+                    )
+                );
+                my @children = @{ $pool->{children} || [] };
+                if (@children) {
+                    $P->add_perfdata(
+                        uom   => '',
+                        value => scalar(@children),
+                        label => "$desc children"
+                    );
+                    my @cdesc = ();
+                    foreach my $child (@children) {
+                        my $c = $p{$child};
+                        my @n = sort { $a <=> $b } @{ $c->{lnns} };
+                        $P->add_perfdata(
+                            uom   => '',
+                            value => scalar(@n),
+                            label => ucfirst( $c->{type} )
+                              . " $c->{name} Nodecount"
+                        );
+                        push @cdesc,
+                            ucfirst( $c->{type} )
+                          . " $c->{name}: Nodes "
+                          . join( ',', @n );
+                    }
+                    $P->add_message( OK,
+                        "$desc has children: " . join( " ; ", @cdesc ) );
+                }
+                foreach my $type (qw(free avail)) {
+                    &threshold_check(
+                        "$type-pct" => [ "$desc ".ucfirst($type)." Percent", $u->{$type.'_pct'} ] );
+                    &threshold_check(
+                        "$type-bytes" => [ "$desc ".ucfirst($type)." Bytes", $u->{$type.'_bytes'} ] );
+                }
+                $P->add_perfdata(
+                    uom   => '%',
+                    value => sprintf("%.2f",$u->{ $_ . '_pct' }),
+                    label => "$desc Percent " . ucfirst($_)
+                ) foreach qw(free avail virtual_hot_spare);
+                $P->add_perfdata(
+                    uom   => 'B',
+                    value => $u->{ $_ . '_bytes' },
+                    label => "$desc Bytes " . ucfirst($_)
+                ) foreach qw(total free avail virtual_hot_spare);
+            }
+        },
+    },
+    Drives => {
+        doc  => "Report on any drive/storage status reported",
+        code => sub {
+            my $s    = &is('/platform/1/storagepool/status');
+            my $node = $P->opts->node;
+            if ( my @problems = map { (@$_) } values %$s ) {
+                my @nodes =
+                  sort { $a <=> $b }
+                  map  { ref($_) ? (ref $_->{device} ? $_->{device}->{lnn} : $_->{device}) : $_ }
+                  map  { ( @{ $_->{affected} } ) } @problems;
+                if ($node) {
+                    if ( grep $node == $_, @nodes ) {
+                        $P->add_message( CRITICAL,
+                            sprintf(
+"%d Storage Problem(s) detected, node %s affected",
+                                scalar(@problems), $node
+                            )
+                        );
+                    }
+                    else {
+                        $P->add_message( OK,
+                            sprintf(
+"%d Storage Problem(s) detected, node %s not affected",
+                                scalar(@problems), $node
+                            )
+                        );
+                    }
+                }
+                else {
+                    my $desc = join ',', @nodes;
+                    $P->add_message( CRITICAL,
+                        sprintf(
+                            "%d Storage Problem(s) detected across node(s) %s",
+                            scalar(@problems), $desc
+                        )
+                    );
+                }
+            }
+            else {
+                $P->add_message( OK, "No Storage Problems reported" );
+            }
+
+            foreach my $key ( sort keys %$s ) {
+                foreach my $stg ( @{ $s->{$key} } ) {
+                    my %stg      = %$stg;
+                    my $affected = delete $stg{affected};
+                    my $flags    = delete $stg{health_flags};
+                    my ( $thing, @things ) = sort keys %stg;
+                    my $name       = $stg{$thing}->{name};
+                    my $drives     = $stg{$thing}->{drives};
+                    my $drivecount = @$drives;
+                    my %drivenodes = ();
+                    my $policy     = $stg{$thing}->{protection_policy};
+                    next if $node and not grep $_->{lnn} == $node, @$drives;
+                    $drivenodes{ $_->{lnn} }++ foreach @$drives;
+
+                   # if a node is offline the $affected->{device} value is a plain integer but the rest of the code expects something else
+                   foreach my $hash (@$affected) {
+                       if (not ref $hash->{device}) {
+                           $hash->{device} = {lnn => $hash->{device}, "bay" => -1, "__fix__" => '__fix__'};
+                       }
+                   }
+                    if ($affected && @$affected && grep {not $node or $node == $_->{device}->{lnn}} @$affected) {
+                        my $desc = sprintf(
+                            "%s across %d drives / %d nodes (%s)",
+                            $policy,
+                            scalar(@$drives),
+                            scalar( keys(%drivenodes) ),
+                            join( ',', sort { $a <=> $b } keys %drivenodes )
+                        );
+                        $P->add_message( CRITICAL,
+                            sprintf(
+                                "%s %s (%s) has %d affected device(s)",
+                                ucfirst($thing), $name,
+                                $desc,           scalar(@$affected)
+                            )
+                        );
+                        foreach my $a (@$affected) {
+                            my %a    = %$a;
+                            my $d    = delete $a{device};
+                            my $type = ucfirst delete $a{type};
+                            $P->add_message( CRITICAL,
+                                sprintf(
+                                    "%15s Node %2d Bay %2d %s is %s",
+                                    ucfirst($key),
+                                    $d->{lnn},
+                                    $d->{bay},
+                                    $type,
+                                    join( ',',
+                                        map ucfirst,
+                                        grep $a->{$_},
+                                        sort keys %a )
+                                )
+                            );
+                        }
+                        if ( $flags && @$flags ) {
+                            $P->add_message( CRITICAL,
+                                sprintf(
+                                    "%15s Health Flags: %s",
+                                    ucfirst($key), join( ',', map ucfirst, @$flags )
+                                )
+                            );
+                        }
+                    }
+                    $P->add_message( CRITICAL,
+                            "Problems with "
+                          . join( ' + ', @things )
+                          . " also reported" )
+                      if @things;    # not really expecting
+                }
+            }
+
+            # perf
+            my $stats = &is('/platform/statistics/summary/system');
+            $P->add_perfdata(
+                uom   => 'B',
+                value => $stats->{system}->[0]->{ "disk_" . lc($_) },
+                label => "Cluster Disk $_"
+            ) foreach grep {defined $stats->{system}->[0]->{ "disk_" . lc($_) }} qw(In Out);
+        }
+    },
+    Events => {
+        doc  => "Any unresolved events",
+        code => sub {
+            my $unresolved =
+              &is('/platform/event/eventgroup-occurrences/?resolved=0');
+            if ( $unresolved->{total} == 0 ) {
+                $P->add_message( OK, "Zero unresolved events" );
+            }
+            foreach
+              my $event ( sort { $b->{time_noticed} <=> $a->{time_noticed} }
+                @{ $unresolved->{eventgroups} } )
+            {
+                my $since  = localtime $event->{time_noticed};
+                # put the events we want to know about in here
+                my $causes = join ' & ', map $_->[1], @{ $event->{causes} };
+                my $status = {
+                    warning       => WARNING,
+                    critical      => CRITICAL,
+                    informational => OK,
+                }->{ $event->{severity} }
+                  || CRITICAL;
+                my $code = $event->{causes}->[0]->[0];
+                # override status
+                $status = OK;
+                $status = CRITICAL if grep ($code eq $_,@ISILON_EVENTS_CRITICAL);
+                $status = WARNING if grep ($code eq $_,@ISILON_EVENTS_WARNING);
+                $P->add_message(
+                    $status,
+                    sprintf "%s since %s - %s [%s]",
+                    ucfirst( $event->{severity} ),
+                    $since, $causes, $code
+                );
+            }
+            #my $recent =
+            #  &is('/platform/event/eventgroup-occurrences/?resolved=1&limit=5');
+        },
+    },
+    Network => {
+        doc  => "Network Interfaces are UP",
+        code => sub {
+            my $node = $P->opts->node;
+
+            # ups + downs
+            my $ifs = &is('/platform/network/interfaces');
+            foreach my $if ( grep { !$node or $_->{lnn} eq $node }
+                sort { $a->{lnn} <=> $b->{lnn} || $a->{name} cmp $b->{name} }
+                @{ $ifs->{interfaces} } )
+            {
+                my $owners = join ";", map {
+                    my $ips = join " ", @{ $_->{ip_addrs} };
+                    "$_->{pool}/$_->{subnet}/$_->{groupnet} ($ips)"
+                } @{ $if->{owners} };
+                my $desc = sprintf "Node %d IF '%s' %s %s type %s%s",
+                  $if->{lnn}, $if->{name}, $if->{status}, $if->{nic_name},
+                  $if->{type}, $owners ? " [$owners]" : " [No Pool Assigned]";
+                my $status = { up => OK }->{ $if->{status} } // CRITICAL;
+                $status = OK unless $owners;
+                $P->add_message( $status, $desc );
+            }
+
+            # if perf
+            if ($node) {
+
+                # summary
+                my @stats = qw(
+                  node.net.int.bytes.in.rate
+                  node.net.int.bytes.out.rate
+                  node.net.ext.bytes.in.rate
+                  node.net.ext.bytes.out.rate
+                  node.net.int.errors.in.rate
+                  node.net.int.errors.out.rate
+                  node.net.ext.errors.in.rate
+                  node.net.ext.errors.out.rate
+                );
+                &stats( node => $node, stats => \@stats );
+            }
+            else {
+                # cluster perf
+                my $stats = &is('/platform/statistics/summary/system');
+                $P->add_perfdata(
+                    uom   => 'B',
+                    value => $stats->{system}->[0]->{ "net_" . lc($_) },
+                    label => "Cluster Network $_"
+                ) foreach qw(In Out);
+            }
+        },
+    },
+    Power => {
+        doc  => "Report check on power at node or cluster level",
+        code => sub {
+            my @nodes = ();
+            if ( my $node = $P->opts->node ) {
+                @nodes = ($node)
+            } else { # check all nodes if none is given
+                my $config = eval { &is('/platform/3/cluster/config') };
+                @nodes = map {$_->{lnn}} @{$config->{devices}};
+            }
+            foreach my $node (@nodes) {
+                my $info = &is("/platform/cluster/nodes/$node/");
+                my $ps = $info->{nodes}->[0]->{status}->{powersupplies};
+               if (not $ps) {
+                       $P->add_message( CRITICAL, "Node $node has no information available about power supplies" );
+                       next;
+               }
+                $P->add_message( OK, "Node $node has $ps->{count} power supplies" );
+                foreach my $s (@{$ps->{supplies}}) {
+                    if ($s->{good} eq 'ERROR') {
+                        push @extra, "INFO - Node $node power supply $s->{name} is $s->{good}, ignoring";
+                    } else {
+                        $P->add_message( ($s->{good} eq 'Good')?OK:CRITICAL, "Node $node power supply $s->{name} is $s->{good}" );
+                    }
+                    $P->add_message( ($s->{status} =~ /good$/)?OK:CRITICAL, "Node $node power supply $s->{id} $s->{name} is $s->{status}" );
+                }
+                my $bs = $info->{nodes}->[0]->{status}->{batterystatus};
+                $P->add_message( OK, "Node $node has battery present '$bs->{present}'" );
+                $P->add_message( OK, "Node $node has battery supported '$bs->{supported}'" );
+                $P->add_message( OK, "Node $node last test battery '$bs->{last_test_time1}'" );
+                $P->add_message( OK, "Node $node next test battery '$bs->{next_test_time1}'" );
+                foreach my $result (grep /^result/, sort keys %$bs) {
+                    my $r = $bs->{$result};
+                    my $status = {'N/A' => OK, 'passed' => OK, 'stopped' => OK}->{$r} // CRITICAL;
+                    $P->add_message( $status, "Node $node has battery status $result of '$r'");
+                }
+                foreach my $bstatus (grep /^status/, sort keys %$bs) {
+                    my $r = $bs->{$bstatus};
+                    my $status = {
+                        'N/A' => OK,
+                        'Good' => OK,
+                        'Ready and enabled' => OK,
+                        'Ready, enabled, and charging' => OK,
+                        'Ready, enabled, and discharging' => OK,
+                        'Ready, enabled, and fully charged' => OK,
+                        'Ready and enabled w/ end of life warning' => WARNING,
+                    }->{$r} // CRITICAL;
+                    $P->add_message( $status, "Node $node has battery status $bstatus of '$r'");
+                }
+            }
+        },
+    },
+);
+
+# get the given stats for a node
+my %node2dev = ();
+
+sub stats {
+    my %args  = @_;
+    my $devid = '';
+    if ( $args{node} ) {
+
+        # populate node2dev
+        unless ( keys %node2dev ) {
+            $node2dev{ $_->{lnn} } = $_->{devid}
+              foreach @{ &is('/platform/cluster/config')->{devices} };
+        }
+        $devid = $node2dev{ $args{node} };
+    }
+    my $allstats = join ',', sort @{ $args{stats} };
+    $devid &&= "&devid=$devid";
+    my $data = &is("/platform/1/statistics/current?keys=$allstats$devid");
+    foreach my $stat ( @{ $data->{stats} } ) {
+        my $value = $stat->{value};
+        my $key   = $stat->{key};
+        if ( ref $value eq 'ARRAY' ) {
+            my @v = values %{ $value->[0] };
+            $value = 0;
+            $value += $_ foreach @v;
+        }
+        my $display_value = sprintf "%.2f", $value;
+        if ( $key =~ /\.bytes\./ ) {
+            $display_value = &human_bytes($value);
+        }
+        elsif ( $key =~ /\.percent/ ) {
+            $display_value = sprintf "%.2f%%", $value;
+        }
+        $display_value .= "/s" if $key =~ /\.rate/;
+
+        if ( $stat->{error} or $stat->{error_code} ) {
+            $P->add_message( CRITICAL,
+"Error $stat->{error_code} '$stat->{error}': $key is $display_value"
+            );
+        }
+        else {
+            $P->add_message( OK, "$key is $display_value" );
+        }
+        foreach my $type (qw(free avail)) {
+            if ( $key =~ /\.percent\.$type/ ) {
+                &threshold_check( "$type-pct" => [ "$key", $value ] );
+            }
+            elsif ( $key =~ /\.bytes\.$type/ ) {
+                &threshold_check( "$type-bytes" => [ $key, $value ] );
+            }
+        }
+        my $uom = '';
+        if ($key =~ /\.percent\./) {
+            $uom = '%';
+            $value = sprintf "%.2f", $value;
+        }
+        $uom = 'B' if $key =~ /\.bytes\./;
+        $P->add_perfdata( uom => $uom, value => $value, label => $key );
+    }
+}
+
+sub human_bytes {
+    my $v    = shift || 0;
+    my %size = (
+        kB => 10**3,
+        MB => 10**6,
+        GB => 10**9,
+        TB => 10**12,
+        PB => 10**15,
+    );
+    my $human  = "$v B";
+    my %others = ();
+    foreach my $suffix (qw(kB MB GB TB PB)) {
+        my $m = $v / $size{$suffix};
+        $others{$suffix} = $m;
+        $human = sprintf "%.4g %s", $m, $suffix if $m > 1;
+    }
+    return $human, %others if wantarray();
+    return $human;
+}
+
+# augment the usage hash with stats
+sub usage_stats {
+    my $s = shift;    # edit in place
+    foreach my $thing ( 'virtual_hot_spare',
+        map { ( $_, $_ . '_ssd' ) } qw(avail free total) )
+    {
+        my $b = $s->{ $thing . '_bytes' } || 0;
+        my ( $human, %others ) = &human_bytes($b);
+
+        $s->{ $thing . '_human' } = $human;
+        foreach my $suffix ( keys %others ) {
+            $s->{ $thing . "_$suffix" } = $others{$suffix};
+        }
+    }
+    foreach my $thing (qw(avail free virtual_hot_spare)) {
+        my $frac = ( $s->{ $thing . '_bytes' } || 0 ) / $s->{total_bytes};
+        $s->{ $thing . '_frac' } = $frac;
+        $s->{ $thing . '_pct' }  = $frac * 100;
+    }
+}
+
+sub threshold_check {
+    my %in = @_;
+    foreach my $thing (@THINGS) {
+        next
+          unless exists $in{$thing}
+          and ref $in{$thing}
+          and ref( $in{$thing} ) eq 'ARRAY';
+        my ( $name, $value ) = @{ $in{$thing} };
+        my @help = ();
+        my %t    = ();
+        foreach my $level (@LEVELS) {
+            $t{$level} = { above => '', below => '' };
+            foreach my $dir (@DIRS) {
+                if ( my $x = $P->opts->get("$level-$thing-$dir") ) {
+                    $t{$level}{$dir} = $x;
+                    push @help, "$level $dir $x";
+                }
+            }
+            $t{$level}{t} =
+              ( $t{$level}{above} or $t{$level}{below} )
+              ? "$t{$level}{below}:$t{$level}{above}"
+              : '';
+        }
+        if (@help) {
+            my $alert = $P->check_threshold(
+                check    => $value,
+                critical => $t{critical}{t},
+                warning  => $t{warn}{t}
+            );
+            my $string = sprintf "%s is %.2f (%s)", $name, $value, join "; ",
+              @help;
+            $P->add_message( $alert, $string );
+        }
+    }
+}
+
+# debug is bitwise
+our $DEBUG = 0;
+sub DEBUG { return $DEBUG }
+our %DBG_STR = (
+    1  => 'WARN',
+    2  => 'INFO',
+    4  => 'URL',
+    8  => 'JSON',
+    16 => 'PERL',
+    32 => 'CACHE',
+    64 => 'TABLE',
+);
+
+$P->add_arg(
+    spec    => "server|isilon|H=s",
+    help    => "The Isilon web/api server url",
+    default => "http://localhost:8080",
+);
+
+$P->add_arg(
+    spec => "username|user|U=s",
+    help => "Auth username for the server",
+);
+
+$P->add_arg(
+    spec => "password|pass|P=s",
+    help => "Auth password for the server",
+);
+
+$P->add_arg(
+    spec => "debug|d=i",
+    help => "Debug level, bitwise: "
+      . join( "|", map "$_=$DBG_STR{$_}", sort { $a <=> $b } keys %DBG_STR ),
+);
+
+$P->add_arg(
+    spec => "check|type|C=s",
+    help => "Which check to perform, " . join( "|", sort keys %CHECKS ),
+);
+
+$P->add_arg(
+    spec => "node|n=s",
+    help =>
+"Which node to perform the check on, alters behaviour of checks from cluster-specific to node",
+);
+
+$P->getopts;
+
+$DEBUG = $P->opts->debug if $P->opts->debug;
+
+if ( $P->opts->verbose ) {
+    $DEBUG |= $_ foreach keys %DBG_STR;
+    &debug( 1, "Verbose: set the debug level to $DEBUG" );
+}
+
+my $CHECK = $P->opts->check;
+
+if ( not exists $CHECKS{$CHECK} ) {
+    $P->plugin_die( "No such check type '$CHECK', please use one of "
+          . join( ", ", sort keys %CHECKS ) );
+}
+
+my $J = JSON->new;
+$J->canonical(1);    # sorted for cache hits
+eval { $J->boolean_values( '', 'TRUE' ) if 16 & DEBUG() }; # instead of objects to make Dumper more readable
+
+my $B = LWP::UserAgent->new();
+use IO::Socket::SSL;
+$B->ssl_opts(
+    SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE,
+    verify_hostname => 0,
+);
+$B->agent( "$0/" . VERSION );
+$B->timeout($P->opts->timeout);
+
+my $IS = {};
+
+# create Isilon Session
+sub is_auth {
+    my $url = shift;
+    $url ||= 'http://' . $P->opts->server . ':8080';
+    my $content = $J->encode(
+        {
+            username => $P->opts->username,
+            password => $P->opts->password,
+            services => ["platform"]
+        }
+    );
+    &debug( 4, "POST $url/session/1/session" );
+    my $res = $B->post(
+        "$url/session/1/session",
+        'Content-Type' => 'application/json',
+        Content        => $content
+    );
+    if (not $res->is_success()) {
+        $P->add_message( CRITICAL, "Unable to authenticate, can't proceed with checks, http error: ".$res->message );
+        do_exit()
+    }
+    my $data = $J->decode( $res->content );
+
+    ( $IS->{cookie}->{$url} ) =
+      split( /;/, ( grep /isisessid/, $res->header("Set-Cookie") )[0] )
+      or die "No cookie in auth result for $url: " . $res->content;
+    ( $IS->{csrf}->{$url} ) = map { /isicsrf=([\w\-]+)/; $1 }
+      grep { /isicsrf=/ } $res->header("Set-Cookie");
+}
+
+# isilon request
+sub is {
+    my ( $path, $host ) = @_;
+    $host ||= $P->opts->server;
+    my $url = "https://$host:8080";
+    &is_auth($url) unless $IS->{cookie}->{$url};
+    my %headers = (
+        Cookie         => $IS->{cookie}->{$url},
+        'X-CSRF-Token' => $IS->{csrf}->{$url},
+        Referer        => $url,
+    );
+    &debug( 4, "GET  $url$path" );
+    my $res = $B->get( $url . $path, %headers );
+    &debug( 8, "< " . $res->content );
+    my $return = $J->decode( $res->content );
+    &debug( 16, Dumper($return) );
+
+    if ( ref($return) eq 'HASH' and exists $return->{errors} ) {
+        &debug( 1, "ERR   $_->{code}: $_->{message}" )
+          foreach @{ $return->{errors} };
+        foreach (@{ $return->{errors} }) {
+         if ($P->opts->node and $_->{code} eq 'AEC_SYSTEM_INTERNAL_ERROR' and ($_->{message} eq 'Unable to contact remote peer: [60] Operation timed out. Results fetched from cached state.' or $_->{message} =~ /^Error querying for statistics: Remote query: remote communication error: cluster stat incomplete, missing at least one node: LNN \d+$/)) {
+            $P->add_message( OK, "Ignoring other Node Problem: API error $_->{code}: '$_->{message}'" );
+          } else {
+            $P->add_message( WARNING, "API error $_->{code}: '$_->{message}'" )
+          }
+        }
+        return;
+    }
+    if (    ref($return) eq 'HASH'
+        and exists $return->{resume}
+        and $return->{resume} )
+    {    # too many results
+        $P->add_message( WARNING,
+            "API result not completely processed: $return->{resume}" );
+    }
+    return $return;
+}
+
+sub debug {
+    my ( $level, @stuff ) = @_;
+    return unless ( $level & DEBUG );
+    printf STDERR ( "%5s: %s\n", $DBG_STR{$level}, $_ ) foreach @stuff;
+}
+
+# do the exit
+sub do_exit {
+    my $unknown  = shift;
+    my $code     = $P->check_messages;
+    my @messages = ();
+    my $first    = not $unknown;
+    foreach my $c (qw(critical warning ok)) {
+        my @list = @{ $P->messages->{$c} };
+        next unless @list;
+        if ($first) {
+            push @messages, shift @list;
+            $first = 0;
+        }
+        push @messages, map "  " . uc($c) . " - $_", @list;
+    }
+    if ($unknown) {
+        unshift @messages, $unknown;
+        $code = UNKNOWN;
+    }
+    my $messages = join "\n", @messages, @extra;
+    $P->plugin_exit( $code, $messages );
+}
+
+eval { $CHECKS{$CHECK}{code}->() };
+
+do_exit("Failed to get $CHECK info: $@") if $@;
+
+do_exit();

@@ -1,0 +1,34 @@
+.Dd $Mdocdate$
+.Dt CHECK_HWRAID 1
+.Os
+.Sh NAME
+.Nm check_hwraid
+.Nd query the health of a RAID controller
+.Sh SYNOPSIS
+.Nm 
+.Op Fl t
+.Ar familytype
+.Sh DESCRIPTION
+The
+.Nm
+.Xr icinga2 8
+plugin returns the status of supported hardware RAID controllers and optionally
+any diagnostic information from the controller.
+.Pp
+The plugin itself does not query the controller; helper scripts are called from
+.Nm
+which return a predefined JSON structure to be processed.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl t
+Set the device type. If undefined, standard input is read.
+.Sh EXIT STATUS
+.Nm
+exits with good exit codes
+.Sh EXAMPLES
+Check an intel raid device...
+.Bd -literal -width indent
+$ raidcat -t intel
+.Sh SEE ALSO
+.Xr icinga2 1

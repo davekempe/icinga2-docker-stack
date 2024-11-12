@@ -1,0 +1,49 @@
+#!/bin/bash
+# this script checks watch folders for files that aren't getting picked up properly.
+# The folder being empty or having young files in it is OK
+# the file being large or having old files in it is bad
+
+
+
+if [[ -z "$1" ]] || [[ -z "$2" ]] || [[ -z "$3" ]] || [[ -z "$4" ]] || [[ -z "$5" ]]; then
+        echo "Missing parameters! Syntax: ./check_watchfolder FOLDER WARNING_THRESHOLD CRITICAL_THRESHOLD MINUTESOLD EXTENSION"
+        exit 2
+fi
+
+FOLDER=$1
+WARNING_THRESHOLD=$2
+CRITICAL_THRESHOLD=$3
+MINUTESOLD=$4
+EXTENSION=$5
+
+
+OLDERTHANADAYLIST=`find $FOLDER -maxdepth 1 -mmin +$MINUTESOLD  -name "*.$EXTENSION"`
+YOUNGERTHANADAYLIST=`find $FOLDER -maxdepth 1 -mmin -$MINUTESOLD  -name "*.$EXTENSION"`
+
+#echo "Here is a list of files older than 1 day: $OLDERTHANADAYLIST"
+#echo "Here is a list of files younger than 1 day: $YOUNGERTHANADAYLIST"
+
+#first are there any old files?
+NUMOLDFILES=`find $FOLDER -maxdepth 1 -mmin +$MINUTESOLD  -name "*.$EXTENSION"|wc -l`
+if [ "$NUMOLDFILES" -gt "1" ]
+        then echo "CRITICAL: There are $NUMOLDFILES old files in the watch folder: $FOLDER . Here is a list: $OLDERTHANADAYLIST"
+        exit 2
+fi
+
+NUMYOUNGFILES=`find $FOLDER -maxdepth 1 -mmin -$MINUTESOLD  -name "*.$EXTENSION"|wc -l`
+if [ "$NUMYOUNGFILES" -gt "$WARNING_THRESHOLD" ]
+        then if [ "$NUMYOUNGFILES" -gt "$CRITICAL_THRESHOLD" ]
+                then echo "CRITICAL: There are $CRITICAL_THRESHOLD too many files ($NUMYOUNGFILES) in the watch folder $FOLDER older than $CRITICAL_THRESHOLD minutes"
+                exit 2
+                fi
+        echo "WARNING: There are $WARNING_THRESHOLD files in the watch folder $FOLDER older than $WARNING_THRESHOLD minutes"
+        exit 1
+fi
+
+#if we got this far, it must be OK
+if [ "$NUMOLDFILES" -lt "1" ]
+        then echo "OK: There are no folders in the watch file that are older than $MINUTESOLD minutes"
+        exit 0
+        else echo "UNKNOWN: something went wrong"
+        exit 127
+fi

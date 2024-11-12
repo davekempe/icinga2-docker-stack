@@ -1,0 +1,1424 @@
+#!/usr/bin/env perl
+#-----------------------------------------------------------------------------
+# This program is open source, licensed under the PostgreSQL license.
+# For license terms, see the LICENSE file.
+#
+# Author: Stefan Fercot
+# Copyright: (c) 2018-2020, Dalibo.
+# Copyright: (c) 2020-2024, Stefan Fercot.
+#-----------------------------------------------------------------------------
+
+=head1 NAME
+
+check_pgbackrest - pgBackRest backup check plugin for Nagios
+
+=head1 SYNOPSIS
+
+  check_pgbackrest [-s|--service SERVICE] [-S|--stanza NAME]
+  check_pgbackrest [-l|--list]
+  check_pgbackrest [--help]
+
+=head1 DESCRIPTION
+
+check_pgbackrest is designed to monitor pgBackRest (2.52 and above) backups from Nagios.
+
+=cut
+
+use vars qw($VERSION $PROGRAM $PGBR_SUPPORT $INIT_TIME);
+use strict;
+use warnings;
+use POSIX;
+use Data::Dumper;
+use File::Basename;
+use File::Spec;
+use File::Find;
+use Getopt::Long qw(:config bundling no_ignore_case_always);
+use Pod::Usage;
+use Config;
+use FindBin;
+
+# Display error message if some specific modules are not loaded
+BEGIN {
+    my(@DBs, @missingDBs, $mod);
+
+    @DBs = qw(JSON);
+    for $mod (@DBs) {
+        if (eval "require $mod") {
+            $mod->import();
+        } else {
+            push @missingDBs, $mod;
+        }
+    }
+    die "@missingDBs module(s) not loaded.\n" if @missingDBs;
+}
+
+# Messing with PATH so pod2usage always finds this script
+my @path = split /$Config{'path_sep'}/ => $ENV{'PATH'};
+push @path => $FindBin::Bin;
+$ENV{'PATH'} = join $Config{'path_sep'} => @path;
+undef @path;
+
+# Reference to the output sub
+my $output_fmt;
+
+$VERSION = '2.5dev';
+$PROGRAM = 'check_pgbackrest';
+$PGBR_SUPPORT = '2.52';
+$INIT_TIME = time();
+
+# Available services and descriptions.
+#-----------------------------------------------------------------------------
+
+my %services = (
+    'retention' => {
+        'sub'  => \&check_retention,
+        'desc' => 'Check the retention policy.',
+        'stanza-arg' => 1
+    },
+    'archives' => {
+        'sub'  => \&check_wal_archives,
+        'desc' => 'Check WAL archives.',
+        'stanza-arg' => 1
+    },
+    'check_pgb_version' => {
+        'sub'  => \&check_check_pgbackrest_version,
+        'desc' => 'Check the version of this check_pgbackrest script.',
+        'stanza-arg' => 0
+    },
+    'pgbackrest_version' => {
+        'sub'  => \&check_pgbackrest_version,
+        'desc' => 'Check the version of pgBackRest.',
+        'stanza-arg' => 0
+    }
+);
+
+=over
+
+=item B<-s>, B<--service> SERVICE
+
+The Nagios service to run. See section SERVICES for a description of
+available services or use C<--list> for a short service and description
+list.
+
+=item B<-S>, B<--stanza> NAME
+
+Name of the stanza to check.
+
+=item B<--repo> REPOSITORY
+
+Repository index to operate on. If no C<--repo> argument is provided, the
+service will operate on all repositories defined, checking for inconsistencies
+across multiple repositories. When using multiple repositories, it is
+recommended to also define checks using the C<--repo> argument to verify the
+sanity of each repository separately.
+
+=item B<-O>, B<--output> OUTPUT_FORMAT
+
+The output format. Supported outputs are: C<human>, C<json>, C<nagios> (default),
+C<nagios_strict> and C<prtg>.
+
+The C<nagios_strict> output format will filter out unsupported types of values
+from the performance data.
+
+=item B<-C>, B<--command> FILE
+
+pgBackRest executable file (default: "pgbackrest").
+
+=item B<-c>, B<--config> CONFIGURATION_FILE
+
+pgBackRest configuration file.
+
+=item B<-P>, B<--prefix> COMMAND
+
+Some prefix command to execute the pgBackRest info command 
+(eg: "sudo -iu postgres").
+
+=item B<-l>, B<--list>
+
+List available services.
+
+=item B<--debug>
+
+Print some debug messages.
+
+=item B<-V>, B<--version>
+
+Print version and exit.
+
+=item B<-?>, B<--help>
+
+Show this help page.
+
+=back
+
+=cut
+
+my %args = (
+    'command' => 'pgbackrest',
+    'output' => 'nagios',
+    'wal-segsize' => '16MB',
+    'default-pgbackrest-config-file' => '/etc/pgbackrest.conf',
+);
+
+# Set name of the program without path*
+my $orig_name = $0;
+$0 = $PROGRAM;
+
+# Die on kill -1, -2, -3 or -15
+$SIG{'HUP'} = $SIG{'INT'} = $SIG{'QUIT'} = $SIG{'TERM'} = \&terminate;
+
+# Handle SIG
+sub terminate {
+    my ($signal) = @_;
+    die ("SIG $signal caught.");
+}
+
+# Print the version and exit
+sub version {
+    printf "%s version %s, Perl %vd\n",
+        $PROGRAM, $VERSION, $^V;
+
+    exit 0;
+}
+
+# List services that can be performed
+sub list_services {
+
+    print "List of available services:\n\n";
+
+    foreach my $service ( sort keys %services ) {
+        printf "\t%-17s\t%s\n", $service, $services{$service}{'desc'};
+    }
+
+    exit 0;
+}
+
+# Handle output formats
+#-----------------------------------------------------------------------------
+
+# Define which @longmsg keys will use TimeSeconds or Count units.
+my @TimeKeys = ("latest_bck_age", "latest_full_age", "latest_archive_age", "oldest_bck_age");
+my @CountKeys = ("full", "diff", "incr", "num_unique_archives", "num_missing_archives");
+
+sub dprint {
+    return unless $args{'debug'};
+    foreach (@_) {
+        print "DEBUG: $_";
+    }
+}
+
+sub unknown($;$$$) {
+    return $output_fmt->( 3, $_[0], $_[1], $_[2], $_[3] );
+}
+
+sub critical($;$$$) {
+    return $output_fmt->( 2, $_[0], $_[1], $_[2], $_[3] );
+}
+
+sub warning($;$$$) {
+    return $output_fmt->( 1, $_[0], $_[1], $_[2], $_[3] );
+}
+
+sub ok($;$$$) {
+    return $output_fmt->( 0, $_[0], $_[1], $_[2], $_[3] );
+}
+
+sub human_output ($$;$$$) {
+    my $rc      = shift;
+    my $service = shift;
+    my $ret;
+    my @msg;
+    my @longmsg;
+    my @human_only_longmsg;
+
+    @msg      = @{ $_[0] } if defined $_[0];
+    @longmsg  = @{ $_[1] } if defined $_[1];
+    @human_only_longmsg  = @{ $_[2] } if defined $_[2];
+
+    $ret  = sprintf "%-15s: %s\n", 'Service', $service;
+
+    $ret .= sprintf "%-15s: 0 (%s)\n", "Returns", "OK"       if $rc == 0;
+    $ret .= sprintf "%-15s: 1 (%s)\n", "Returns", "WARNING"  if $rc == 1;
+    $ret .= sprintf "%-15s: 2 (%s)\n", "Returns", "CRITICAL" if $rc == 2;
+    $ret .= sprintf "%-15s: 3 (%s)\n", "Returns", "UNKNOWN"  if $rc == 3;
+
+    $ret .= sprintf "%-15s: %s\n", "Message", $_ foreach @msg;
+    $ret .= sprintf "%-15s: %s\n", "Long message", $_ foreach @longmsg;
+    $ret .= sprintf "%-15s: %s\n", "Long message", $_ foreach @human_only_longmsg;
+
+    print $ret;
+    return $rc;
+}
+
+sub json_output ($$;$$$) {
+    my $rc      = shift;
+    my $service = shift;
+    my @msg;
+    my @longmsg;
+    my @human_only_longmsg;
+
+    @msg      = @{ $_[0] } if defined $_[0];
+    @longmsg  = @{ $_[1] } if defined $_[1];
+    @human_only_longmsg  = @{ $_[2] } if defined $_[2];
+    
+    my %json_hash = ('service' => $service);
+    my @rc_long = ("OK", "WARNING", "CRITICAL", "UNKNOWN");
+    $json_hash{'status'}{'code'} = $rc;
+    $json_hash{'status'}{'message'} = $rc_long[$rc];
+    $json_hash{'message'} = join( ', ', @msg ) if @msg;
+
+    foreach my $msg_to_split (@longmsg, @human_only_longmsg) {
+        my ($key, $value) = split(/=/, $msg_to_split);
+        $json_hash{'long_message'}{$key} = $value;
+    }
+
+    my $json_text = encode_json \%json_hash;
+    print "[$json_text]";
+    return $rc;
+}
+
+sub nagios_output ($$;$$) {
+    my $rc  = shift;
+    my $ret = shift;
+    my @msg;
+    my @longmsg;
+
+    $ret .= " OK"       if $rc == 0;
+    $ret .= " WARNING"  if $rc == 1;
+    $ret .= " CRITICAL" if $rc == 2;
+    $ret .= " UNKNOWN"  if $rc == 3;
+
+    @msg      = @{ $_[0] } if defined $_[0];
+    @longmsg  = @{ $_[1] } if defined $_[1];
+
+    $ret .= " - ". join( ', ', @msg )    if @msg;
+    $ret .= " | ". join( ' ', @longmsg ) if @longmsg;
+
+    print $ret;
+    return $rc;
+}
+
+sub nagios_strict_output ($$;$$) {
+    my $rc  = shift;
+    my $service = shift;
+    my @msg;
+    my @longmsg;
+
+    @msg      = @{ $_[0] } if defined $_[0];
+    @longmsg  = @{ $_[1] } if defined $_[1];
+
+    # Generate TEXT message
+    my $text;
+    $text .= $service . " OK"       if $rc == 0;
+    $text .= $service . " WARNING"  if $rc == 1;
+    $text .= $service . " CRITICAL" if $rc == 2;
+    $text .= $service . " UNKNOWN"  if $rc == 3;
+    $text .= " - ". join( ', ', @msg )  if @msg;
+
+    # Enforce Nagios strict specs, filter out some keys
+    my @longmsg_strict;
+    foreach my $msg_to_split (@longmsg) {
+        my ($key, $value) = split(/=/, $msg_to_split);
+
+        if ( grep /^$key$/, @TimeKeys or grep /^$key$/, @CountKeys ) {
+            push @longmsg_strict, $msg_to_split;
+        }
+    }
+
+    $text .= " | ". join( ' ', @longmsg_strict ) if @longmsg_strict;
+    print $text;
+    return $rc;
+}
+
+sub prtg_output ($$;$$) {
+    my $rc  = shift;
+    my $service = shift;
+    my @msg;
+    my @longmsg;
+    my @textmsg;
+
+    @msg      = @{ $_[0] } if defined $_[0];
+    @longmsg  = @{ $_[1] } if defined $_[1];
+
+    # Generate TEXT message
+    my $text = "<text>";
+    $text .= $service . " OK"       if $rc == 0;
+    $text .= $service . " WARNING"  if $rc == 1;
+    $text .= $service . " CRITICAL" if $rc == 2;
+    $text .= $service . " UNKNOWN"  if $rc == 3;
+    $text .= " - ". join( ', ', @msg )  if @msg;
+
+    # Generate service status result
+    my $results = "<result><channel>status</channel><value>$rc</value>";
+    $results .= "<LimitMaxWarning>0</LimitMaxWarning>";
+    $results .= "<LimitMaxError>1</LimitMaxError>";
+    $results .= "<LimitMode>1</LimitMode></result>";
+    
+    foreach my $msg_to_split (@longmsg) {
+        my ($key, $value) = split(/=/, $msg_to_split);
+
+        if ( grep /^$key$/, @TimeKeys ) {
+            chop($value);
+            $results .= "<result><channel>$key</channel><value>$value</value><Unit>TimeSeconds</Unit></result>";
+
+        } elsif ( grep /^$key$/, @CountKeys ) {
+            $results .= "<result><channel>$key</channel><value>$value</value><Unit>Count</Unit></result>";
+
+        } else {
+            # Add extra keys to the text message
+            push @textmsg, $msg_to_split;
+        }
+    }
+
+    $text .= " - ". join( ', ', @textmsg )  if @textmsg;
+    $text .= "</text>";
+    print "<prtg>" . $results . $text. "</prtg>";
+    return $rc;
+}
+
+# Handle time intervals
+#-----------------------------------------------------------------------------
+
+sub is_time($){
+    my $str_time = lc( shift() );
+    return 1 if ( $str_time
+        =~ /^(\s*([0-9]\s*[smhd]?\s*))+$/
+    );
+    return 0;
+}
+
+# Return formatted time string with units.
+# Parameter: duration in seconds
+sub to_interval($) {
+    my $val      = shift;
+    my $interval = '';
+
+    return $val if $val =~ /^-?inf/i;
+
+    $val = int($val);
+ 
+    if ( $val > 604800 ) {
+        $interval = int( $val / 604800 ) . "w ";
+        $val %= 604800;
+    }
+
+    if ( $val > 86400 ) {
+        $interval .= int( $val / 86400 ) . "d ";
+        $val %= 86400;
+    }
+
+    if ( $val > 3600 ) {
+        $interval .= int( $val / 3600 ) . "h";
+        $val %= 3600;
+    }
+
+    if ( $val > 60 ) {
+        $interval .= int( $val / 60 ) . "m";
+        $val %= 60;
+    }
+
+    $interval .= "${val}s" if $val > 0;
+
+    return "${val}s" unless $interval; # Return a value if $val <= 0
+
+    return $interval;
+}
+
+sub to_interval_output_dependent($) {
+    my $val      = shift;
+    my $interval = '';
+
+    return $val if $val =~ /^-?inf/i;
+    $val = int($val);
+    return to_interval($val) unless $args{'output'} =~ /^(nagios|nagios_strict|prtg)$/;
+    return "${val}s";
+}
+
+# Return a duration in seconds from an interval (with units).
+sub get_time($) {
+    my $str_time = lc( shift() );
+    my $ts       = 0;
+    my @date;
+
+    die(      "Malformed interval: «$str_time»!\n"
+            . "Authorized unit are: dD, hH, mM, sS.\n" )
+        unless is_time($str_time);
+
+    # No bad units should exist after this line!
+
+    @date = split( /([smhd])/, $str_time );
+
+LOOP_TS: while ( my $val = shift @date ) {
+
+        $val = int($val);
+        die("Wrong value for an interval: «$val»!") unless defined $val;
+
+        my $unit = shift(@date) || '';
+
+        if ( $unit eq 'm' ) {
+            $ts += $val * 60;
+            next LOOP_TS;
+        }
+
+        if ( $unit eq 'h' ) {
+            $ts += $val * 3600;
+            next LOOP_TS;
+        }
+
+        if ( $unit eq 'd' ) {
+            $ts += $val * 86400;
+            next LOOP_TS;
+        }
+
+        $ts += $val;
+    }
+
+    return $ts;
+}
+
+# Handle size units
+#-----------------------------------------------------------------------------
+
+# Return a size in bytes from a size with unit.
+# If unit is '%', use the second parameter to compute the size in bytes.
+sub get_size($;$) {
+    my $str_size = shift;
+    my $size     = 0;
+    my $unit     = '';
+
+    die "Only integers are accepted as size. Adjust the unit to your need.\n"
+        if $str_size =~ /[.,]/;
+
+    $str_size =~ /^([0-9]+)(.*)$/;
+
+    $size = int($1);
+    $unit = lc($2);
+
+    return $size unless $unit ne '';
+
+    if ( $unit eq '%' ) {
+        my $ratio = shift;
+
+        die("Can't compute a ratio without the factor!\n")
+            unless defined $unit;
+
+        return int( $size * $ratio / 100 );
+    }
+
+    return $size           if $unit eq 'b';
+    return $size * 1024    if $unit =~ '^k[bo]?$';
+    return $size * 1024**2 if $unit =~ '^m[bo]?$';
+    return $size * 1024**3 if $unit =~ '^g[bo]?$';
+    return $size * 1024**4 if $unit =~ '^t[bo]?$';
+    return $size * 1024**5 if $unit =~ '^p[bo]?$';
+    return $size * 1024**6 if $unit =~ '^e[bo]?$';
+    return $size * 1024**7 if $unit =~ '^z[bo]?$';
+
+    die("Unknown size unit: $unit\n");
+}
+
+# Interact with pgBackRest
+#-----------------------------------------------------------------------------
+
+sub pgbackrest_info {
+    my $infocmd = $args{'command'}." info";
+    $infocmd .= " --stanza=".$args{'stanza'};
+    $infocmd .= " --output=json --log-level-console=error";
+
+    if(defined $args{'config'}) {
+        $infocmd .= " --config=".$args{'config'};
+    }
+
+    if(defined $args{'repo'}) {
+        $infocmd .= " --repo=".$args{'repo'};
+    }
+
+    if(defined $args{'prefix'}) {
+        $infocmd = $args{'prefix'}." $infocmd";
+    }
+
+    dprint("pgBackRest info command was : '$infocmd'\n");
+    my $json_output = `$infocmd 2>&1 |grep -v "^ERROR:"`;
+
+    die("Can't get pgBackRest info.\nCommand was '$infocmd'.\n") unless ($? eq 0);
+    
+    my $decoded_json = eval { decode_json($json_output) };
+    die("pgBackRest output was not valid JSON.\nHINT: does your configuration file contain invalid option?\n") if ($@);
+
+    foreach my $line (@{$decoded_json}) {
+        return $line if($line->{'name'} eq $args{'stanza'});
+    }
+
+    return;
+}
+
+sub pgbackrest_get {
+    my $directory = shift;
+    my $filename = shift;
+    my $repo_key = shift;
+
+    pod2usage(
+        -message => 'FATAL: Unsupported pgBackRest version.',
+        -exitval => 127
+    ) if ( pgbackrest_version() lt $PGBR_SUPPORT );
+
+    my $getcmd = $args{'command'}." repo-get";
+    $getcmd .= " --stanza=".$args{'stanza'};
+    $getcmd .= " ".$directory."/".$filename;
+    $getcmd .= " --log-level-console=error";
+    $getcmd .= " --repo=".$repo_key;
+
+    if(defined $args{'config'}) {
+        $getcmd .= " --config=".$args{'config'};
+    }
+
+    if(defined $args{'prefix'}) {
+        $getcmd = $args{'prefix'}." $getcmd";
+    }
+
+    dprint("pgBackRest get command was : '$getcmd'\n");
+    my $file_content = `$getcmd 2>&1 |grep -v "^ERROR:" |grep -v "^WARN:"`;
+
+    die("Can't get pgBackRest file content.\nCommand was '$getcmd'.\n") unless ($? eq 0);
+
+    return $file_content;
+}
+
+sub pgbackrest_ls {
+    my $directory = shift;
+    my $repo_key = shift;
+    my $recurse = shift;
+
+    pod2usage(
+        -message => 'FATAL: Unsupported pgBackRest version.',
+        -exitval => 127
+    ) if ( pgbackrest_version() lt $PGBR_SUPPORT );
+
+    my $lscmd = $args{'command'}." repo-ls";
+    $lscmd .= " --stanza=".$args{'stanza'};
+    $lscmd .= " ".$directory;
+    $lscmd .= " --output=json --log-level-console=error";
+    $lscmd .= " --repo=".$repo_key;
+
+    if($recurse) {
+        $lscmd .= " --recurse";
+    }    
+
+    if(defined $args{'config'}) {
+        $lscmd .= " --config=".$args{'config'};
+    }
+
+    if(defined $args{'prefix'}) {
+        $lscmd = $args{'prefix'}." $lscmd";
+    }
+
+    dprint("pgBackRest ls command was : '$lscmd'\n");
+    my $json_output = `$lscmd 2>&1 |grep -v "^ERROR:"`;
+
+    die("Can't get pgBackRest list.\nCommand was '$lscmd'.\n") unless ($? eq 0);
+    
+    my $decoded_json = eval { decode_json($json_output) };
+    die("pgBackRest output was not valid JSON.\nHINT: does your configuration file contain invalid option?\n") if ($@);
+    return $decoded_json;
+}
+
+sub pgbackrest_version {
+    my $version_cmd = $args{'command'}." version";
+
+    if(defined $args{'config'}) {
+        $version_cmd .= " --config=".$args{'config'};
+    }    
+
+    if(defined $args{'prefix'}) {
+        $version_cmd = $args{'prefix'}." $version_cmd";
+    }
+
+    dprint("pgBackRest version command was : '$version_cmd'\n");
+    my $pgbackrest_version = `$version_cmd | sed -e s/pgBackRest\\ //`;
+
+    die("Can't get pgBackRest version.\nCommand was '$version_cmd'.\n") unless ($? eq 0);
+    
+    chomp($pgbackrest_version);
+    return $pgbackrest_version;
+}
+
+# Services
+#-----------------------------------------------------------------------------
+
+=head2 SERVICES
+
+Descriptions and parameters of available services.
+
+=over
+
+=item B<retention>
+
+Fail when the number of full backups is less than the 
+C<--retention-full> argument.
+
+Fail when the number of differential backups is less than the
+C<--retention-diff> argument.
+
+Fail when the number of incremental backups is less than the
+C<--retention-incr> argument.
+
+Fail when the newest backup is older than the C<--retention-age> 
+argument.
+
+Fail when the newest full backup is older than the 
+C<--retention-age-to-full> argument.
+
+Fail when the oldest backup is newer than the
+C<--retention-age-to-oldest> argument.
+
+The following units are accepted (not case sensitive): s (second), m 
+(minute), h (hour), d (day). You can use more than one unit per 
+given value.
+
+Arguments are not mandatory to only show some information.
+
+=cut
+
+sub check_retention {
+    my $me             = 'BACKUPS_RETENTION';
+    my %args           = %{ $_[0] };
+    my @msg;
+    my @warn_msg;
+    my @crit_msg;
+    my @longmsg;
+
+    # When using the --repo option, pgBackRest info will apply the repository filter
+    my $backups_info = pgbackrest_info();
+    die("Can't get pgBackRest info.\n") unless (defined $backups_info);
+
+    if($backups_info->{'status'}->{'code'} == 0) {
+        # List each repository content
+        my @backups_dir_content;
+
+        foreach my $repo (@{$backups_info->{'repo'}}) {
+            my $backups_dir = "backup/".$args{'stanza'}; # Relative path inside repository
+            dprint("repo".$repo->{'key'}.", backups_dir: $backups_dir\n");
+            $backups_dir_content[$repo->{'key'}] = pgbackrest_ls($backups_dir, $repo->{'key'}, 0);
+        }
+
+        # List backups per type and check consistency between backup info and real repository content
+        my @full_bck;
+        my @diff_bck;
+        my @incr_bck;
+
+        foreach my $line (@{$backups_info->{'backup'}}) {
+            push @full_bck, $line if($line->{'type'} eq "full");
+            push @diff_bck, $line if($line->{'type'} eq "diff");
+            push @incr_bck, $line if($line->{'type'} eq "incr");
+
+            my $backup_label = $line->{'label'};
+            my $repo_key = $line->{'database'}->{'repo-key'};
+
+            unless(defined $backups_dir_content[$repo_key]->{$backup_label} and
+                        $backups_dir_content[$repo_key]->{$backup_label}->{'type'} eq 'path') {
+                push @crit_msg, "$backup_label directory missing in repo$repo_key";
+            }
+
+            # Check if any error was detected during the backup (reported in the json output since pgBackRest 2.36)
+            if(defined $line->{'error'} && $line->{'error'}){
+                push @crit_msg, "error(s) detected during backup $backup_label (repo$repo_key)";
+            }
+        }
+
+        push @longmsg, "full=".scalar(@full_bck);
+        push @longmsg, "diff=".scalar(@diff_bck);
+        push @longmsg, "incr=".scalar(@incr_bck);
+
+        # Check retention-full
+        if(defined $args{'retention-full'} and scalar(@full_bck) < $args{'retention-full'}) {
+            push @crit_msg, "not enough full backups: ".$args{'retention-full'}." required";
+        }
+
+        # Check retention-diff
+        if(defined $args{'retention-diff'} and scalar(@diff_bck) < $args{'retention-diff'}) {
+            push @crit_msg, "not enough differential backups: ".$args{'retention-diff'}." required";
+        }
+
+        # Check retention-incr
+        if(defined $args{'retention-incr'} and scalar(@incr_bck) < $args{'retention-incr'}) {
+            push @crit_msg, "not enough incremental backups: ".$args{'retention-incr'}." required";
+        }
+
+        # Check latest age
+        # Backup age considered at pg_stop_backup
+        my $latest_bck = @{$backups_info->{'backup'}}[-1];
+        my $latest_bck_age = time() - $latest_bck->{'timestamp'}->{'stop'};
+        push @longmsg, "latest_bck=".$latest_bck->{'label'};
+        push @longmsg, "latest_bck_type=".$latest_bck->{'type'};
+        push @longmsg, "latest_bck_age=".to_interval_output_dependent($latest_bck_age);
+
+        if(defined $args{'retention-age'}){
+            my $bck_age_limit = get_time($args{'retention-age'} );
+            push @crit_msg, "backups are too old" if $latest_bck_age >= $bck_age_limit;
+        }
+
+        # Check latest full backup age
+        if(defined $args{'retention-age-to-full'}){
+            my $latest_full_bck = $full_bck[-1];
+            my $latest_full_bck_age = time() - $latest_full_bck->{'timestamp'}->{'stop'};
+            push @longmsg, "latest_full=".$latest_full_bck->{'label'};
+            push @longmsg, "latest_full_age=".to_interval_output_dependent($latest_full_bck_age);
+
+            my $bck_age_limit = get_time($args{'retention-age-to-full'} );
+            push @crit_msg, "full backups are too old" if $latest_full_bck_age >= $bck_age_limit;
+        }
+
+        # Check oldest age
+        my $oldest_bck = @{$backups_info->{'backup'}}[0];
+        my $oldest_bck_age = time() - $oldest_bck->{'timestamp'}->{'stop'};
+        push @longmsg, "oldest_bck=".$oldest_bck->{'label'};
+        push @longmsg, "oldest_bck_age=".to_interval_output_dependent($oldest_bck_age);
+
+        if(defined $args{'retention-age-to-oldest'}){
+            my $bck_age_limit = get_time($args{'retention-age-to-oldest'} );
+            push @crit_msg, "backups are too young" if $oldest_bck_age < $bck_age_limit;
+        }
+
+    }else{
+        # Get the exact status code per repository
+        foreach my $repo (@{$backups_info->{'repo'}}) {
+            push @crit_msg, "repo".$repo->{'key'}.": ".$repo->{'status'}->{'message'} if $repo->{'status'}->{'code'} gt 0;
+        }
+    }
+
+    return critical($me, \@crit_msg, \@longmsg) if @crit_msg;
+    return warning($me, \@warn_msg, \@longmsg) if @warn_msg;
+    push @msg, "backups policy checks ok";
+    return ok( $me, \@msg, \@longmsg );
+}
+
+=item B<archives>
+
+Check if all archived WALs exist between the oldest and the latest 
+WAL needed for the recovery.
+
+Use the C<--wal-segsize> argument to set the WAL segment size.
+
+The following units are accepted (not case sensitive):
+b (Byte), k (KB), m (MB), g (GB), t (TB), p (PB), e (EB) or Z (ZB). Only
+integers are accepted. Eg. C<1.5MB> will be refused, use C<1500kB>.
+
+The factor between units is 1024 bytes. Eg. C<1g = 1G = 1024*1024*1024.> 
+
+Use the C<--ignore-archived-before> argument to ignore the archived 
+WALs generated before the provided interval. Used to only check the
+latest archives.
+
+Use the C<--ignore-archived-after> argument to ignore the archived 
+WALs generated after the provided interval.
+
+The C<--latest-archive-age-alert> argument defines the max age of 
+the latest archived WAL as an interval before raising a critical 
+alert.
+
+The following units are accepted as interval (not case sensitive):
+s (second), m (minute), h (hour), d (day). You can use more than 
+one unit per given value. If not set, the last unit is in seconds. 
+Eg. "1h 55m 6" = "1h55m6s".
+
+All the missing archives are only shown in the C<--debug> mode.
+
+Use C<--list-archives> in addition with C<--debug> to print the list of all the
+archived WAL segments.
+
+Use C<--list-boundaries> in addition with C<--debug> to print the list of all the
+boundary WAL segments fetched from the history files.
+
+By default, all the archives older than the oldest backup start archive 
+or newer than the max_wal returned by the pgBackRest info command 
+are ignored. 
+
+Use the C<--extended-check> argument to force a full check of the found 
+archives and raise warnings in case of inconsistencies.
+
+When WAL archives on different timelines are found, .history files are parsed to
+find the switch point and define the boundary WAL.
+
+Use the C<--max-archives-check-number> to prevent infinite WAL archives check
+when boundary WAL can't be defined properly.
+
+In case of pgBackRest db history change (after a successful stanza-upgrade),
+only the latest db system/version will be checked.
+
+=cut
+
+sub get_archived_wal_list {
+    my $min_wal = shift;
+    my $max_wal = shift;
+    my $args_ref = shift;
+    my %args = %{ $args_ref };
+    my $archives_dir = shift;
+    my $suffix = "(\.(gz|lz4|zst|xz|bz2))?";
+
+    my %filelist;
+    my @branch_wals;
+    my $filename_re_full = qr/[0-9A-F]{24}.*$suffix$/;
+    my $start_tl = substr($min_wal, 0, 8);
+    my $end_tl   = substr($max_wal, 0, 8);
+    my $history_re_full = qr/$end_tl.history$/;
+
+    foreach my $repo_key (keys %{$archives_dir}) {
+        dprint("repo$repo_key, archives_dir: ".$archives_dir->{$repo_key}."\n");
+        my $list = pgbackrest_ls($archives_dir->{$repo_key}, $repo_key, 1);
+
+        foreach my $key (keys %{$list}) {
+            next unless $list->{$key}->{'type'} eq 'file';
+            my @split_tab = split('/', $key);
+            my $filename = $split_tab[-1];
+
+            if($filename =~ /$filename_re_full/){
+                # Get stats of the archived WALs
+                if ( $args{'ignore-archived-after'} or $args{'ignore-archived-before'} ) {
+                    my $diff_epoch = $INIT_TIME - $list->{$key}->{'time'};
+
+                    if ( $args{'ignore-archived-after'} && $diff_epoch <= get_time($args{'ignore-archived-after'}) ){
+                        dprint ("ignored file ".$filename." as interval since epoch : ".to_interval($diff_epoch)."\n");
+                        next;
+                    }
+
+                    if ( $args{'ignore-archived-before'} && $diff_epoch >= get_time($args{'ignore-archived-before'}) ){
+                        dprint ("ignored file ".$filename." as interval since epoch : ".to_interval($diff_epoch)."\n");
+                        next;
+                    }
+                }
+
+                my $segname = substr($filename, 0, 24);
+                if ( ! $args{'extended-check'} && $segname lt $min_wal ){
+                    dprint ("ignored file ".$segname." older than ".$min_wal."\n");
+                    next;
+                }
+
+                if ( ! $args{'extended-check'} && $segname gt $max_wal ){
+                    dprint ("ignored file ".$segname." newer than ".$max_wal."\n");
+                    next;
+                }
+
+                # Only add the file in the list if not already found in a previous loop/repository
+                unless(defined $filelist{$segname}){
+                    $filelist{$segname} = [$segname, $filename, $list->{$key}->{'time'}, $list->{$key}->{'size'}, $archives_dir->{$repo_key}."/$key"];
+                }
+
+            }elsif($filename =~ /$history_re_full/ && $start_tl ne $end_tl){
+                # Look for the last history file if needed
+                dprint("history file to open : ".$archives_dir->{$repo_key}."/$key\n");
+
+                my $history_content = pgbackrest_get($archives_dir->{$repo_key}, $filename, $repo_key);
+                my @history_lines = split /\n/, $history_content;
+                foreach my $line ( @history_lines ){
+
+                    my $line_re = qr/^\s*(\d+)\t([0-9A-F]+)\/([0-9A-F]+)\t.*$/;
+                    $line =~ /$line_re/ || next;
+                    push @branch_wals =>
+                        sprintf("%08X%08s%08X", $1, $2, hex($3)>>24);
+
+                    # DEBUG print all boundaries
+                    if($args{'list-boundaries'}) {
+                        dprint("pushed '".$branch_wals[-1]."' to boundary list\n");
+                    }
+                }
+            }
+        }
+    }
+
+    my @unique_branch_wals = do { my %seen; grep { !$seen{$_}++ } @branch_wals };
+    return(\%filelist, \@unique_branch_wals);
+}
+
+sub generate_needed_wal_archives_list {
+    my $min_wal = shift;
+    my $max_wal = shift;
+    my $branch_wals_ref = shift;
+    my @branch_wals = @{ $branch_wals_ref };
+    my $seg_per_wal = shift;
+    my $start_tl = substr($min_wal, 0, 8);
+    my $end_tl   = substr($max_wal, 0, 8);
+    my $timeline = hex($start_tl);
+    my $wal = hex(substr($min_wal, 8, 8));
+    my $seg = hex(substr($min_wal, 16, 8));
+    my $args_ref = shift;
+    my %args = %{ $args_ref };
+
+    # Generate list
+    my $curr = $min_wal;
+    my @needed_wal_archives_list;
+    push @needed_wal_archives_list, $min_wal;
+
+    for ( my $i=0, my $j=1; $curr lt $max_wal ; $i++, $j++ ) {
+        $curr = sprintf('%08X%08X%08X',
+            $timeline,
+            $wal + int(($seg + $j)/$seg_per_wal),
+            ($seg + $j)%$seg_per_wal
+        );
+
+        if ( grep /$curr/, @branch_wals ) {
+            dprint("boundary '$curr' reached, jumping to next timeline...\n");
+            $timeline++;
+            $j--;
+            next;
+
+        }else{
+            push @needed_wal_archives_list, $curr;
+        }
+
+        # Break the loop in case max-archives-check-number is defined
+        # Infinite loop might happen when there's a timeline switch but boundary WAL isn't detected correctly
+        die("max-archives-check-number limit exceeded.\n") if (
+            defined $args{'max-archives-check-number'} and
+            scalar(@needed_wal_archives_list) > $args{'max-archives-check-number'}
+        );
+    }
+
+    my @unique_needed_wal_archives_list = do { my %seen; grep { !$seen{$_}++ } @needed_wal_archives_list };
+    return sort @unique_needed_wal_archives_list;
+}
+
+sub check_wal_archives {
+    my $me             = 'WAL_ARCHIVES';
+    my %args           = %{ $_[0] };
+    my @msg;
+    my @warn_msg;
+    my @crit_msg;
+    my @longmsg;
+    my @human_only_longmsg;
+
+    # When using the --repo option, pgBackRest info will apply the repository filter
+    my $start_time = time();
+    my $backups_info = pgbackrest_info();
+    die("Can't get pgBackRest info.\n") unless (defined $backups_info);
+    dprint("!> pgBackRest info took ".(time() - $start_time)."s\n");
+
+    if ( $backups_info->{'status'}->{'code'} == 0 ) {
+        my %archives_dir;
+        my $min_wal;
+        my $max_wal;
+
+        # The latest PG system and version must match across repos for the stanza
+        my %latest_db;
+        foreach my $db (@{$backups_info->{'db'}}) {
+            my $repo_key = $db->{'repo-key'};
+            if ( not $latest_db{$repo_key}{'id'} or $latest_db{$repo_key}{'id'} lt $db->{'id'} ) {
+                $latest_db{$repo_key}{'id'} = $db->{'id'};
+                $latest_db{$repo_key}{'system-id'} = $db->{'system-id'};
+                $latest_db{$repo_key}{'version'} = $db->{'version'};
+            }
+        }
+
+        my @repo_keys = sort(keys %latest_db);
+        for(my $i = $repo_keys[0]; $i < $repo_keys[-1]; $i++){
+            if ( $latest_db{$i}{'system-id'} ne $latest_db{$i+1}{'system-id'} ||
+                 $latest_db{$i}{'version'} ne $latest_db{$i+1}{'version'} ) {
+                return critical $me, ['database mismatch across repos'];
+            }
+        }
+
+        # Only look at the latest PG system/version archives
+        foreach my $line (@{$backups_info->{'archive'}}) {
+            my $repo_key = $line->{'database'}->{'repo-key'};
+            if ( $latest_db{$repo_key}{'id'} == $line->{'database'}->{'id'} ) {
+                $archives_dir{$repo_key} = "archive/".$args{'stanza'}."/".$line->{'id'}; # Relative path inside repository
+                $min_wal = $line->{'min'} if(not $min_wal or $line->{'min'} lt $min_wal);
+                $max_wal = $line->{'max'} if(not $max_wal or $line->{'max'} gt $max_wal);
+            }else{
+                dprint ("ignoring archives for db id ".$line->{'database'}->{'id'}." in repo ".$repo_key."\n");
+            }
+        }
+
+        # Get the oldest and latest backup info (ordered by backup-timestamp-stop) for the latest PG system/version
+        my @current_db_backups;
+        foreach my $line (@{$backups_info->{'backup'}}) {
+            my $repo_key = $line->{'database'}->{'repo-key'};
+            if ( $latest_db{$repo_key}{'id'} == $line->{'database'}->{'id'} ) {
+                push(@current_db_backups, $line);
+            }
+        }
+        my $oldest_bck = $current_db_backups[0];
+        my $oldest_bck_archive_start = $oldest_bck->{'archive'}->{'start'};
+        my $latest_bck = $current_db_backups[-1];
+        my $latest_bck_archive_start = $latest_bck->{'archive'}->{'start'};
+
+        # Change min_wal to oldest_bck_archive_start
+        if ( $min_wal lt $oldest_bck_archive_start ) {
+            $min_wal = $oldest_bck_archive_start;
+            dprint ("min_wal changed to ".$min_wal."\n");
+        }
+
+        # Get all the WAL archives and history files
+        $start_time = time();
+        dprint("Get all the WAL archives and history files...\n");
+        my ($filelist_ref, $branch_wals_ref) = &get_archived_wal_list($min_wal, $max_wal, \%args, \%archives_dir);
+        my %filelist;
+        %filelist = %{ $filelist_ref } if $filelist_ref;
+        my @filelist_simplified = sort(keys %filelist);
+        my $first_wal_in_list = $filelist_simplified[0];    # identify first elem of hash array
+        my $last_wal_in_list = $filelist_simplified[-1];    # identify last elem of hash array
+
+        my @branch_wals;
+        @branch_wals = @{ $branch_wals_ref } if $branch_wals_ref;
+        return unknown $me, ['no archived WAL found'] unless %filelist;
+        dprint("!> Get all the WAL archives and history files took ".(time() - $start_time)."s\n");
+
+        # Change min_wal if some archives are ignored
+        if ( $args{'ignore-archived-before'} && $min_wal ) {
+            $min_wal = $first_wal_in_list;
+            dprint ("min_wal changed to ".$min_wal."\n");
+        }
+
+        # Change max_wal if some archives are ignored
+        if ( $args{'ignore-archived-after'} && $max_wal ) {
+            $max_wal = $last_wal_in_list;
+            dprint ("max_wal changed to ".$max_wal."\n");
+        }
+
+        # Check min/max exists, start = min, last = max ?
+        return critical $me, ['min WAL not found: '.$min_wal] if($min_wal && ! grep( /^$min_wal$/, @filelist_simplified ));
+        return critical $me, ['max WAL not found: '.$max_wal] if($max_wal && ! grep( /^$max_wal$/, @filelist_simplified ));
+        push @warn_msg, "min WAL is not the oldest archive" if($min_wal && $filelist{$first_wal_in_list}[0] lt $min_wal);
+        push @warn_msg, "max WAL is not the latest archive" if($max_wal && $filelist{$last_wal_in_list}[0] gt $max_wal);
+
+        my $latest_archive_age = time() - $filelist{$last_wal_in_list}[2];
+        my $num_archives = scalar(@filelist_simplified);
+        push @longmsg, "latest_archive_age=".to_interval_output_dependent($latest_archive_age);
+        push @longmsg, "num_unique_archives=$num_archives";
+
+        # Is the latest archive too old ?
+        if ( $args{'latest-archive-age-alert'} && $latest_archive_age > get_time($args{'latest-archive-age-alert'})){
+            push @crit_msg => "latest_archive_age (".to_interval($latest_archive_age).") exceeded";
+        }
+        push @msg, "$num_archives unique WAL archived";
+        push @msg, "latest archived since ". to_interval($latest_archive_age);
+
+        # Check if boundary WALs could be defined from history files
+        dprint("List timeline switches and check boundary WALs...\n");
+        $start_time = time();
+        my $check_tl = hex(substr($min_wal, 0, 8));
+        my $end_tl   = hex(substr($max_wal, 0, 8));
+        my $nb_tl_switch = $end_tl - $check_tl;
+        dprint("$nb_tl_switch timeline switch(es) happened between $min_wal and $max_wal\n") if($nb_tl_switch gt 0);
+        while($check_tl < $end_tl){
+            my $check_tl_string = sprintf("%08X", $check_tl);
+            return critical $me, [$check_tl_string.' boundary WAL not determined'] if(! grep(/^$check_tl_string.{16}$/, @branch_wals));
+            $check_tl++;
+        }
+        dprint("!> List timeline switches and check boundary WALs took ".(time() - $start_time)."s\n");
+
+        # Get all the needed WAL archives based on min/max pgBackRest info
+        my $wal_segsize = $args{'wal-segsize'};
+        my $walsize = '4GB'; # 4 TB -> bytes
+        my $seg_per_wal = get_size($walsize) / get_size($wal_segsize); #Only for PG >= 9.3
+        my $dbver=($backups_info->{'db'}[0]->{'version'}+0)*10;
+        $seg_per_wal-- if $dbver <= 92;
+        dprint("Get all the needed WAL archives...\n");
+        $start_time = time();
+        my @needed_wal_archives_list=&generate_needed_wal_archives_list($min_wal, $max_wal, \@branch_wals, $seg_per_wal, \%args);
+        dprint("!> Get all the needed WAL archives took ".(time() - $start_time)."s\n");
+
+        # Print human_only_longmsg
+        push @human_only_longmsg, "min_wal=$min_wal" if $min_wal;
+        push @human_only_longmsg, "max_wal=$max_wal" if $max_wal;
+        push @human_only_longmsg, "latest_archive=".$filelist{$last_wal_in_list}[0];
+        push @human_only_longmsg, "latest_bck_archive_start=".$latest_bck_archive_start;
+        push @human_only_longmsg, "latest_bck=".$latest_bck->{'label'};
+        push @human_only_longmsg, "latest_bck_type=".$latest_bck->{'type'};
+        push @human_only_longmsg, "oldest_archive=".$filelist{$first_wal_in_list}[0];
+        push @human_only_longmsg, "oldest_bck_archive_start=".$oldest_bck_archive_start;
+        push @human_only_longmsg, "oldest_bck=".$oldest_bck->{'label'};
+        push @human_only_longmsg, "oldest_bck_type=".$oldest_bck->{'type'};
+
+        my @warn_missing_files;
+        my @crit_missing_files;
+        # Go through needed WAL list and check if it exists in the file list
+        $start_time = time();
+        foreach my $needed_wal (@needed_wal_archives_list) {
+            unless ( $filelist{ $needed_wal } ) {
+                if($needed_wal lt $latest_bck_archive_start) {
+                    push @warn_missing_files => $needed_wal;
+                }else{
+                    push @crit_missing_files => $needed_wal;
+                }
+            }
+        }
+        dprint("!> Go through needed WAL list and check took ".(time() - $start_time)."s\n");
+
+        # Go through each backup to check their needed WAL archives
+        $start_time = time();
+        foreach my $line (@current_db_backups){
+            dprint("Get all the needed WAL archives for ".$line->{'label'}."...\n");
+
+            # Ignore backups if archives are ignored
+            my $diff_epoch_stop = $INIT_TIME - $line->{'timestamp'}->{'stop'};
+            if ( $args{'ignore-archived-after'} && $diff_epoch_stop <= get_time($args{'ignore-archived-after'}) ){
+                dprint ("ignored backup ".$line->{'label'}." as interval since epoch : ".to_interval($diff_epoch_stop)."\n");
+                next;
+            }
+
+            my $diff_epoch_start = $INIT_TIME - $line->{'timestamp'}->{'start'};
+            if ( $args{'ignore-archived-before'} && $diff_epoch_start >= get_time($args{'ignore-archived-before'}) ){
+                dprint ("ignored backup ".$line->{'label'}." as interval since epoch : ".to_interval($diff_epoch_start)."\n");
+                next;
+            }
+
+            foreach my $needed_wal (&generate_needed_wal_archives_list($line->{'archive'}->{'start'}, $line->{'archive'}->{'stop'}, \@branch_wals, $seg_per_wal, \%args)) {
+                unless ( $filelist{ $needed_wal } ) {
+                    push @crit_missing_files => $needed_wal;
+                }
+            }
+        }
+        dprint("!> Go through each backup, get the needed WAL and check took ".(time() - $start_time)."s\n");
+
+        # Generate @warn_msg and @crit_msg with missing files (sorted and unique)
+        my @unique_warn_missing_files = do { my %seen; grep { !$seen{$_}++ } @warn_missing_files };
+        my @unique_warn_missing_files_sorted = sort @unique_warn_missing_files;
+        my $num_missing_archives = scalar(@unique_warn_missing_files_sorted);
+        my $oldest_missing_archive = $unique_warn_missing_files_sorted[0] || '000000000000000000000000';
+        my $latest_missing_archive = $unique_warn_missing_files_sorted[-1] || '000000000000000000000000';
+        push @warn_msg, "wrong sequence, $num_missing_archives missing file(s) ($oldest_missing_archive / $latest_missing_archive)" if @warn_missing_files;
+        
+        push @crit_missing_files, @warn_missing_files if @warn_missing_files and @crit_missing_files;
+        my @unique_crit_missing_files = do { my %seen; grep { !$seen{$_}++ } @crit_missing_files };
+        my @unique_crit_missing_files_sorted = sort @unique_crit_missing_files;
+        $num_missing_archives = scalar(@unique_crit_missing_files_sorted);
+        $oldest_missing_archive = $unique_crit_missing_files_sorted[0] || $oldest_missing_archive || '000000000000000000000000';
+        $latest_missing_archive = $unique_crit_missing_files_sorted[-1] || $latest_missing_archive || '000000000000000000000000';
+        push @crit_msg, "wrong sequence, $num_missing_archives missing file(s) ($oldest_missing_archive / $latest_missing_archive)" if @crit_missing_files;
+        push @longmsg, "num_missing_archives=$num_missing_archives" if $num_missing_archives;
+        push @longmsg, "oldest_missing_archive=$oldest_missing_archive" if $num_missing_archives;
+        push @longmsg, "latest_missing_archive=$latest_missing_archive" if $num_missing_archives;
+
+        # DEBUG print all missing archives
+        if(@warn_missing_files and not @crit_missing_files) {
+            foreach (@unique_warn_missing_files_sorted) { dprint("missing $_\n"); }
+        
+        }elsif(@crit_missing_files) {
+            foreach (@unique_crit_missing_files_sorted) { dprint("missing $_\n"); }
+        }
+
+        # DEBUG print all archives
+        if($args{'list-archives'}) {
+            foreach (@filelist_simplified) { dprint("found $_\n"); }
+        }
+
+    }else{
+        # Get the exact status code per repository
+        foreach my $repo (@{$backups_info->{'repo'}}) {
+            push @crit_msg, "repo".$repo->{'key'}.": ".$repo->{'status'}->{'message'} if $repo->{'status'}->{'code'} gt 0;
+        }
+    }
+
+    return critical($me, \@crit_msg, \@longmsg, \@human_only_longmsg) if @crit_msg;
+    return warning($me, \@warn_msg, \@longmsg, \@human_only_longmsg) if @warn_msg;
+    return ok( $me, \@msg, \@longmsg, \@human_only_longmsg);
+}
+
+=item B<check_pgb_version>
+
+Check if this script is running a given version.
+
+You must provide the expected version using C<--target-version>.
+
+=cut
+
+sub check_check_pgbackrest_version {
+    my $me             = 'CHECK_PGBACKREST_VERSION';
+    my %args           = %{ $_[0] };
+    my @msg;
+    my @warn_msg;
+    my @crit_msg;
+    my @longmsg;
+
+    pod2usage(
+        -message => 'FATAL: you must provide --target-version.',
+        -exitval => 127
+    ) if not defined $args{'target-version'};
+
+    pod2usage(
+        -message => "FATAL: given version does not look like a $PROGRAM version!",
+        -exitval => 127
+    ) if ( defined $args{'target-version'} and $args{'target-version'} !~ m/^\d\.\d+(dev)?$/ );
+
+    if (defined $args{'target-version'} and $VERSION ne $args{'target-version'}){
+        push @crit_msg, sprintf("%s version should be %s", $PROGRAM, $args{'target-version'});
+        push @longmsg, sprintf("%s version %s, Perl %vd", $PROGRAM, $VERSION, $^V);
+    }
+
+    return critical($me, \@crit_msg, \@longmsg) if @crit_msg;
+    return warning($me, \@warn_msg, \@longmsg) if @warn_msg;
+
+    push @msg, sprintf("%s version %s, Perl %vd", $PROGRAM, $VERSION, $^V);
+    return ok( $me, \@msg, \@longmsg );
+}
+
+=item B<pgbackrest_version>
+
+Check if pgBackRest is running a given version.
+
+You must provide the expected version using C<--target-version>.
+
+=cut
+
+sub check_pgbackrest_version {
+    my $me             = 'PGBACKREST_VERSION';
+    my %args           = %{ $_[0] };
+    my @msg;
+    my @warn_msg;
+    my @crit_msg;
+    my @longmsg;
+
+    pod2usage(
+        -message => 'FATAL: you must provide --target-version.',
+        -exitval => 127
+    ) if not defined $args{'target-version'};
+
+    pod2usage(
+        -message => "FATAL: given version does not look like a pgBackRest version!",
+        -exitval => 127
+    ) if ( defined $args{'target-version'} and $args{'target-version'} !~ m/^\d\.\d+(\.\d+)?(dev)?$/ );
+
+    my $pgbr_version = pgbackrest_version();
+    if (defined $args{'target-version'} and $pgbr_version ne $args{'target-version'}){
+        push @crit_msg, sprintf("pgBackRest version should be %s", $args{'target-version'});
+        push @longmsg, sprintf("pgBackRest version %s, Perl %vd", $pgbr_version, $^V);
+    }
+
+    return critical($me, \@crit_msg, \@longmsg) if @crit_msg;
+    return warning($me, \@warn_msg, \@longmsg) if @warn_msg;
+
+    push @msg, sprintf("pgBackRest version %s, Perl %vd", $pgbr_version, $^V);
+    return ok( $me, \@msg, \@longmsg );
+}
+
+# End of SERVICE section in pod doc
+=pod
+
+=back
+
+=cut
+
+Getopt::Long::Configure('bundling');
+GetOptions(
+    \%args,
+        'command|C=s',
+        'config|c=s',
+        'debug!',
+        'extended-check!',
+        'help|?!',
+        'ignore-archived-after=s',
+        'ignore-archived-before=s',
+        'latest-archive-age-alert=s',
+        'list|l!',
+        'list-archives|L!',
+        'list-boundaries!',
+        'max-archives-check-number=s',
+        'output|O=s',
+        'prefix|P=s',
+        'repo=s',
+        'retention-age=s',
+        'retention-age-to-full=s',
+        'retention-age-to-oldest=s',
+        'retention-diff=i',
+        'retention-full=i',
+        'retention-incr=i',
+        'service|s=s',
+        'stanza|S=s',
+        'target-version=s',
+        'version|V!',
+        'wal-segsize=s'
+) or pod2usage( -exitval => 127 );
+
+list_services() if $args{'list'};
+version()       if $args{'version'};
+pod2usage( -verbose => 2 ) if $args{'help'};
+pod2usage( -verbose => 1 ) unless defined $args{'service'};
+
+# Check that the given service exists.
+pod2usage(
+    -message => "FATAL: service $args{'service'} does not exist.\n"
+        . "    Use --list to show the available services.",
+    -exitval => 127
+) unless exists $services{ $args{'service'} };
+
+# The stanza name must be given if a service is specified and 'stanza-arg' is required
+pod2usage(
+    -message => "FATAL: you must specify a stanza name.\n"
+        . "    See -S or --stanza command line option.",
+    -exitval => 127
+) if defined $args{'service'} and $services{$args{'service'}}{'stanza-arg'} and not defined $args{'stanza'};
+
+# Check "retention" specific args
+my @specific_args = ('retention-age', 'retention-age-to-full', 'retention-age-to-oldest', 'retention-diff', 'retention-full', 'retention-incr');
+foreach( @specific_args ){
+    pod2usage(
+        -message => "FATAL: \"$_\" is only allowed with \"retention\" service.",
+        -exitval => 127
+    ) if ( $args{$_} and $args{'service'} ne 'retention' );
+}
+
+# Check "archives" specific args
+@specific_args = ('extended-check', 'ignore-archived-after', 'ignore-archived-before', 'latest-archive-age-alert', 'max-archives-check-number');
+foreach( @specific_args ){
+    pod2usage(
+        -message => "FATAL: \"$_\" is only allowed with \"archives\" service.",
+        -exitval => 127
+    ) if ( $args{$_} and $args{'service'} ne 'archives' );
+}
+
+# Check "archives" debug specific args
+@specific_args = ('list-archives', 'list-boundaries');
+foreach( @specific_args ){
+    pod2usage(
+        -message => "FATAL: \"$_\" is only allowed with \"archives\" service and \"debug\" option.",
+        -exitval => 127
+    ) if ( $args{$_} and ( $args{'service'} ne 'archives' or ! $args{'debug'} ));
+}
+
+# Check "check_pgb_version" and "pgbackrest_version" specific arg --target-version
+pod2usage(
+    -message => 'FATAL: "target-version" is only allowed with "check_pgb_version" and "pgbackrest_version" service.',
+    -exitval => 127
+) if ( $args{'target-version'} and ( $args{'service'} ne 'check_pgb_version' and $args{'service'} ne 'pgbackrest_version'));
+
+# Output format
+for ( $args{'output'} ) {
+       if ( /^human$/         ) { $output_fmt = \&human_output          }
+    elsif ( /^json$/          ) { $output_fmt = \&json_output           }
+    elsif ( /^nagios$/        ) { $output_fmt = \&nagios_output         }
+    elsif ( /^nagios_strict$/ ) { $output_fmt = \&nagios_strict_output  }
+    elsif ( /^prtg$/          ) { $output_fmt = \&prtg_output           }
+    else {
+        pod2usage(
+            -message => "FATAL: unrecognized output format \"$_\" (see \"--output\")",
+            -exitval => 127
+        );
+    }
+}
+
+exit $services{ $args{'service'} }{'sub'}->( \%args );
+
+__END__
+
+=head1 CONTRIBUTING
+
+check_pgbackrest is an open project. Any contribution to improve it is welcome.
+
+=head1 VERSION
+
+check_pgbackrest version 2.4, released on Fri Jul 05 2024.
+
+=head1 LICENSING
+
+This program is open source, licensed under the PostgreSQL license.
+For license terms, see the LICENSE file.
+
+=head1 AUTHORS
+
+Author: Stefan Fercot.
+
+Logo: Damien Cazeils (www.damiencazeils.com).
+
+Copyright: (c) 2018-2020, Dalibo / 2020-2024, Stefan Fercot.
+
+=cut

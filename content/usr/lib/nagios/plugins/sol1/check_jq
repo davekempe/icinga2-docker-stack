@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# A generic JSON response check using jq.
+#
+# The concept of this check is very straightforward: request the given URL,
+# pass its output through `jq` with the given expression, and then return
+# `OK` or `CRITICAL` based on whether that expression produces a `true` or
+# `false` value.
+#
+# The devil is, of course, in the detail.  For arbitrarily complicated
+# JSON documents and comparisons, the `jq` expression can become rather
+# long and involved.  Enjoy!
+#
+# You can add extra output to the check with the -o option, which will replace
+# plugin outout text with something more relevant to your check for the OK state
+# or -c option will do that for the crit state.
+#
+# The SAME output is appended to OK and CRITCAL, so just make the words relevant.
+# The plugin output often appears in the body of notifications.
+
+set -eu
+set -o pipefail
+
+URL=""
+AUTH_OPT=""
+EXPR=""
+EXTRAOUTOK=""
+EXTRAOUTCRIT=""
+NOSECURE=""
+HALP="n"
+
+while getopts "u:a:q:o:c:kh" opt; do
+	case "$opt" in
+		u) URL="$OPTARG";;
+		a) AUTH_OPT="--header=Authorization: $OPTARG";;
+		q) EXPR="$OPTARG";;
+		o) EXTRAOUTOK="$OPTARG";;
+		c) EXTRAOUTCRIT="$OPTARG";;
+		k) NOSECURE="--no-check-certificate";;
+		h) HALP="y";;
+	esac
+done
+
+if [ "$HALP" = "y" ]; then
+	cat <<-EOF >&2
+		Request a URL and parse it via jq, looking for a true/false output.
+
+		Usage: check_jq -u <url> -q <jq expr> [-a <auth>] [-h]
+
+		Options:
+
+			-u <url>     The URL to request
+			-q <jq expr> A valid 'jq' expression which must output either 'true' or 'false'
+			-a <auth>    The contents of the 'Authorization:' request header
+			-o <extraoutok> OK state Extra words for the plugin output to make it more relevant
+			-c <extraoutcrit> Crtical state Extra words for the plugin output to make it more relevant
+			-k           add --no-check-certificate to wget
+			-h           Show this help
+	EOF
+
+	exit 0
+fi
+
+if [ -z "$URL" ]; then
+	echo "Please specify a URL to request with -u" >&2
+	exit 3
+fi
+
+if [ -z "$EXPR" ]; then
+	echo "Please specify a jq expression to evaluate with the -q option" >&2
+	exit 3
+fi
+
+set +e
+EXPR_RESULT="$(wget "$NOSECURE" "$AUTH_OPT" -O - -q "$URL" | jq "$EXPR")"
+set -e
+
+if [ "$?" != "0" ]; then
+	echo "UNKNOWN: HTTP request or jq failed"
+	exit 3
+fi
+
+if [ "$EXPR_RESULT" = "true" ]; then
+	echo "OK: expression evaluated to true $EXTRAOUTOK"
+	exit 0
+elif [ "$EXPR_RESULT" = "false" ]; then
+	echo "CRITICAL: expression evaluated to false $EXTRAOUTCRIT"
+	exit 2
+else
+	echo "UNKNOWN: expression evaluated to mystery value $EXPR_RESULT "
+	exit 3
+fi

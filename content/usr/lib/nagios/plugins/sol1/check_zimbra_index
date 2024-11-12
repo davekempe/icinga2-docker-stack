@@ -1,0 +1,198 @@
+#!/bin/bash -e
+
+###############################################################################
+set -e          # exit on command errors (so you MUST handle exit codes properly!)
+set -E          # pass trap handlers down to subshells
+#set -o pipefail # capture fail exit codes in piped commands
+#set -x         # execution tracing debug messages
+
+# Error handler
+on_err() {
+	echo ">> ERROR: $?"
+	FN=0
+	for LN in "${BASH_LINENO[@]}"; do
+		[ "${FUNCNAME[$FN]}" = "main" ] && break
+		echo ">> ${BASH_SOURCE[$FN]} $LN ${FUNCNAME[$FN]}"
+		FN=$(( FN + 1 ))
+	done
+}
+#trap on_err ERR
+
+# Exit handler
+declare -a EXIT_CMDS
+add_exit_cmd() { EXIT_CMDS+="$*;  "; }
+on_exit(){ eval "${EXIT_CMDS[@]}"; }
+#trap on_exit EXIT
+
+# Get command info
+CMD_PWD=$(pwd)
+CMD="$0"
+CMD_DIR="$(cd "$(dirname "$CMD")" && pwd -P)"
+
+
+# Defaults and command line options
+[ "$VERBOSE" ] ||  VERBOSE=
+[ "$DEBUG" ]   ||  DEBUG=
+[ "$QUEUE" ]   ||  QUEUE=
+[ "$AUTH" ]    ||  AUTH=
+[ "$WARN" ]    ||  WARN=0
+[ "$CRIT" ]    ||  CRIT=0
+
+#>>>> PUT YOUR ENV VAR DEFAULTS HERE <<<<
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+EXIT_CODE=$STATE_UNKNOWN
+MESSAGE=""
+
+
+# Basic helpers
+out() { echo "$(date +%Y%m%dT%H%M%SZ): $*"; }
+err() { out "$*" 1>&2; }
+vrb() { [ ! "$VERBOSE" ] || out "$@"; }
+dbg() { [ ! "$DEBUG" ] || err "$@"; }
+
+# Script helpers
+trimMessage() { MESSAGE="$(echo -e "${MESSAGE}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' )"; }
+
+# Show help function to be used below
+show_help() {
+	awk 'NR>1{print} /^(###|$)/{exit}' "$CMD"
+	echo "USAGE: $(basename "$CMD") [arguments]"
+	echo "ARGS:"
+	MSG=$(awk '/^NARGS=-1; while/,/^esac; done/' "$CMD" | sed -e 's/^[[:space:]]*/  /' -e 's/|/, /' -e 's/)//' | grep '^  -')
+	EMSG=$(eval "echo \"$MSG\"")
+	echo "$EMSG"
+}
+
+# Parse command line options (odd formatting to simplify show_help() above)
+NARGS=-1; while [ "$#" -ne "$NARGS" ]; do NARGS=$#; case $1 in
+	# SWITCHES
+	-h|--help)      # This help message
+		show_help; exit 1; ;;
+	-d|--debug)     # Enable debugging messages (implies verbose)
+		DEBUG=$(( DEBUG + 1 )) && VERBOSE="$DEBUG" && shift && echo "#-INFO: DEBUG=$DEBUG (implies VERBOSE=$VERBOSE)"; ;;
+	-v|--verbose)   # Enable verbose messages
+		VERBOSE=$(( VERBOSE + 1 )) && shift && echo "#-INFO: VERBOSE=$VERBOSE"; ;;
+
+	# PAIRS
+	-w|--warn)     # Set a warn to a value (DEFAULT: $WARN)
+		shift && WARN="$1" && shift && vrb "#-INFO: WARN=$WARN"; ;;
+	-c|--crit)     # Set a crit to a value (DEFAULT: $CRIT)
+		shift && CRIT="$1" && shift && vrb "#-INFO: CRIT=$CRIT"; ;;
+
+	*)
+		break;
+esac; done
+
+[ "$DEBUG" ]  &&  set -x
+
+# Make sure required paramaters exit
+if [ -z "$WARN" ] ; then
+	WARN=1000
+fi
+
+if [ -z "$CRIT" ] ; then
+	CRIT=2000
+fi
+
+zmhostname=`su zimbra -l -c 'zmhostname'`
+indexes=`du -shm /opt/zimbra/index/0/*/ | sort -nr | sed -e "s/\// /g" | awk '{print$1":"$6}'`
+
+# Find out if the largest index is over the warning threshold
+if [ `echo $indexes | cut -f1 -d':'` -gt $WARN ] ; then
+ 	UMESSAGE=""
+ 	WMESSAGE=""
+ 	CMESSAGE=""
+
+	# This is a long operation but will be needed now
+	mailboxes=`su zimbra -l -c "zmprov -l gaa -s $zmhostname"`
+	mailboxeswithid=`for m in $mailboxes ; do echo -n "$m:" ; su zimbra -l -c "zmprov gmi $m" | grep mailboxId | sed -e "s/ //g" ; done`
+
+	if [ "$VERBOSE" ] || [ "$DEBUG" ] ; then 
+		echo "mailboxes $mailboxes"
+		echo ""
+		echo "mailboxeswithid $mailboxeswithid"
+	fi
+
+	# interater over the indexes and do something if they are over the thresholds
+	for index in $indexes ; do 
+		size=0
+		id=0
+		mbox=""
+
+		size=`echo $index | cut -f1 -d':'`
+		id=`echo $index | cut -f2 -d':'`
+		if [ "$VERBOSE" ] || [ "$DEBUG" ] ; then 
+			echo "size [$size]; id [$id]"
+		fi
+		
+		if [ $size -gt $WARN ] ; then
+			# Using the stored values to get the account for the id
+			mbox=`for m in $mailboxeswithid ; do echo "$m" | grep "mailboxId:${id}$" | cut -f1 -d':' ; done`
+
+			if [ "$VERBOSE" ] || [ "$DEBUG" ] ; then 
+				echo "mbox $mbox"
+			fi
+		
+
+			# If we don't find an account for the index 
+			if [ "$mbox" = "" ] ; then
+				UMESSAGE="$UMESSAGE $id"
+                		EXIT_CODE=$STATE_WARNING
+				mbox="?"
+			fi
+
+			#Set the values based on the size of the index
+		 	if [ $size -gt $CRIT ] ; then
+				CMESSAGE="$CMESSAGE ${mbox}:${id}:${size}m"
+				EXIT_CODE=$STATE_CRITICAL
+		        else [ $size -gt $WARN ]
+        		        WMESSAGE="$WMESSAGE ${mbox}:${id}:${size}m"
+				if [ $EXIT_CODE -ne $STATE_CRITICAL ] ; then
+                			EXIT_CODE=$STATE_WARNING
+				fi
+			fi 
+
+			if [ "$VERBOSE" ] || [ "$DEBUG" ] ; then 
+				echo "message: u - $UMESSAGE, w - $WMESSAGE, c - $CMESSAGE"
+			fi
+		fi
+	done
+
+	if [ "$UMESSAGE" != "" ] ; then
+		UMESSAGE="Mailbox for indexes unknown $UMESSAGE."
+	fi
+
+	if [ "$WMESSAGE" != "" ] ; then
+		WMESSAGE="Warning indexes $WMESSAGE over ${WARN}mb."
+	fi
+
+	if [ "$CMESSAGE" != "" ] ; then
+		CMESSAGE="Critical indexes $CMESSAGE over ${CRIT}mb."
+	fi
+	
+	if [ "$VERBOSE" ] || [ "$DEBUG" ] ; then 
+		echo "message: u - $UMESSAGE, w - $WMESSAGE, c - $CMESSAGE"
+	fi
+
+else
+	MESSAGE="Indexes for $zmhostname are under ${WARN}mb"
+	EXIT_CODE=$STATE_OK
+fi
+
+if [ $EXIT_CODE -eq $STATE_UNKNOWN ]; then
+    MESSAGE="UNKNOWN - $MESSAGE"
+elif [ $EXIT_CODE -eq $STATE_CRITICAL ]; then
+    MESSAGE="CRITICAL - $CMESSAGE $WMESSAGE"
+elif [ $EXIT_CODE -eq $STATE_WARNING ]; then
+    MESSAGE="WARNING - $WMESSAGE"
+elif [ $EXIT_CODE -eq $STATE_OK ]; then
+    MESSAGE="OK - $MESSAGE"
+fi
+
+echo "$MESSAGE $UMESSAGE" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/  / /g' -e 's/  / /g' -e 's/  / /g'
+exit $EXIT_CODE
+
