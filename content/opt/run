@@ -75,6 +75,12 @@ Icinga Web 2 (/icingaweb2) default credentials: ${ICINGAWEB2_ADMIN_USER}:${ISSET
 Starting Supervisor.
 END
 
+# remove local config
+
+mkdir -p /etc/icinga2/archive
+mv /etc/icinga2/conf.d/* /etc/icinga2/archive/
+mv /etc/icinga2/archive/api-user*.conf /etc/icinga2/conf.d/
+
 icinga2 daemon --validate
 
 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf -n &
