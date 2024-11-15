@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Path to your director sync script
-SYNC_SCRIPT="/opt/supervisor/run_sync_rules.sh"
+SYNC_SCRIPT="/usr/local/bin/run_sync_rules.sh"
 
 # Allow signals to terminate the process
 trap "exit" HUP INT QUIT ABRT ALRM TERM TSTP
