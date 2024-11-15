@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Path to your director sync script
+SYNC_SCRIPT="/opt/supervisor/run_sync_rules.sh"
+
+# Allow signals to terminate the process
+trap "exit" HUP INT QUIT ABRT ALRM TERM TSTP
+
+while true; do
+    # Run the sync script
+    "$SYNC_SCRIPT"
+    
+    # Wait for 60 seconds before the next run
+    sleep 60
+done
+
