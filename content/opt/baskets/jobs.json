@@ -14,7 +14,7 @@
             "disabled": "n",
             "job_class": "Icinga\\Module\\Director\\Job\\SyncJob",
             "job_name": "Sync All",
-            "run_interval": "30",
+            "run_interval": "60",
             "settings": {
                 "rule_id": "__ALL__",
                 "apply_changes": true
