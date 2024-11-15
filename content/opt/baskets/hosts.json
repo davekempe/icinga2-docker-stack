@@ -117,6 +117,7 @@
                 "linked_services": "1",
                 "mode": "20",
                 "munge": "",
+                "parse_all_data_for_listcolumns": "1",
                 "proxy": ""
             },
             "source_name": "Netbox Default Devices"
@@ -254,10 +255,18 @@
                     "source_expression": "${tag_slugs}"
                 },
                 {
-                    "destination_field": "vars.services",
+                    "destination_field": "vars.ssl",
                     "filter_expression": null,
                     "merge_policy": "override",
                     "priority": "24",
+                    "source": "Netbox Default Virtual Machines",
+                    "source_expression": "${service_list_SSL}"
+                },
+                {
+                    "destination_field": "vars.services",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "25",
                     "source": "Netbox Default Virtual Machines",
                     "source_expression": "${service_names}"
                 }
@@ -396,14 +405,16 @@
                     "priority": "23",
                     "source": "Netbox Default Devices",
                     "source_expression": "${tag_slugs}"
-                },                {
+                },
+                {
                     "destination_field": "vars.manufacturer",
                     "filter_expression": null,
                     "merge_policy": "override",
                     "priority": "24",
                     "source": "Netbox Default Devices",
                     "source_expression": "${device_manufacturer}"
-                },                {
+                },
+                {
                     "destination_field": "vars.model",
                     "filter_expression": null,
                     "merge_policy": "override",
@@ -412,10 +423,18 @@
                     "source_expression": "${device_model}"
                 },
                 {
-                    "destination_field": "vars.services",
+                    "destination_field": "vars.ssl",
                     "filter_expression": null,
                     "merge_policy": "override",
                     "priority": "26",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${service_list_SSL}"
+                },
+                {
+                    "destination_field": "vars.services",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "27",
                     "source": "Netbox Default Devices",
                     "source_expression": "${service_names}"
                 }
