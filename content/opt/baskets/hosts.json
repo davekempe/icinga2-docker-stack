@@ -396,12 +396,26 @@
                     "priority": "23",
                     "source": "Netbox Default Devices",
                     "source_expression": "${tag_slugs}"
+                },                {
+                    "destination_field": "vars.manufacturer",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "24",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${device_manufacturer}"
+                },                {
+                    "destination_field": "vars.model",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "25",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${device_model}"
                 },
                 {
                     "destination_field": "vars.services",
                     "filter_expression": null,
                     "merge_policy": "override",
-                    "priority": "24",
+                    "priority": "26",
                     "source": "Netbox Default Devices",
                     "source_expression": "${service_names}"
                 }
