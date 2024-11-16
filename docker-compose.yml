@@ -1,10 +1,10 @@
 services:
   icinga2:
-    #image: sol1/icinga2-stack
-    build:
-      context: ./
-      dockerfile: Dockerfile
-    restart: on-failure:5
+    image: sol1/icinga2-stack
+      #build:
+      #context: ./
+      #dockerfile: Dockerfile
+      #restart: on-failure:5
     networks:
       - autocon-workshop
     # Set your hostname to the FQDN under which your
