@@ -269,6 +269,14 @@
                     "priority": "25",
                     "source": "Netbox Default Virtual Machines",
                     "source_expression": "${service_names}"
+                },
+                {
+                    "destination_field": "vars",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "28",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${custom_fields}"
                 }
             ],
             "purge_action": "delete",
@@ -348,7 +356,7 @@
                     "merge_policy": "override",
                     "priority": "9",
                     "source": "Netbox Default Devices",
-                    "source_expression": "hstt type virtual machine"
+                    "source_expression": "hstt type device"
                 },
                 {
                     "destination_field": "zone",
@@ -437,6 +445,14 @@
                     "priority": "27",
                     "source": "Netbox Default Devices",
                     "source_expression": "${service_names}"
+                },
+                {
+                    "destination_field": "vars",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "28",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${custom_fields}"
                 }
             ],
             "purge_action": "delete",
