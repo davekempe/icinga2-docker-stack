@@ -247,6 +247,14 @@
                     "source_expression": "${primary_ip_address}"
                 },
                 {
+                    "destination_field": "vars",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "20",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${custom_fields}"
+                },
+                {
                     "destination_field": "vars.tags",
                     "filter_expression": null,
                     "merge_policy": "override",
@@ -269,14 +277,6 @@
                     "priority": "25",
                     "source": "Netbox Default Virtual Machines",
                     "source_expression": "${service_names}"
-                },
-                {
-                    "destination_field": "vars",
-                    "filter_expression": null,
-                    "merge_policy": "override",
-                    "priority": "28",
-                    "source": "Netbox Default Devices",
-                    "source_expression": "${custom_fields}"
                 }
             ],
             "purge_action": "delete",
@@ -407,6 +407,14 @@
                     "source_expression": "${primary_ip_address}"
                 },
                 {
+                    "destination_field": "vars",
+                    "filter_expression": null,
+                    "merge_policy": "override",
+                    "priority": "20",
+                    "source": "Netbox Default Devices",
+                    "source_expression": "${custom_fields}"
+                },
+                {
                     "destination_field": "vars.tags",
                     "filter_expression": null,
                     "merge_policy": "override",
@@ -445,14 +453,6 @@
                     "priority": "27",
                     "source": "Netbox Default Devices",
                     "source_expression": "${service_names}"
-                },
-                {
-                    "destination_field": "vars",
-                    "filter_expression": null,
-                    "merge_policy": "override",
-                    "priority": "28",
-                    "source": "Netbox Default Devices",
-                    "source_expression": "${custom_fields}"
                 }
             ],
             "purge_action": "delete",
