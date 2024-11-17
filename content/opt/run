@@ -93,7 +93,7 @@ supervisor_pid=$!
   echo "Supervisor has been running for 40 seconds, now executing script..."
   # extra onetime scripts to import data - need to be idempotent
   /opt/onetime/import-baskets
-  python3 /opt/onetime/director_api.py -s http://localhost -u ${ICINGAWEB2_ADMIN_USER} -p ${ICINGAWEB2_ADMIN_PASS}
+  python3 /opt/setup/onetime/director_api.py -s http://localhost -u ${ICINGAWEB2_ADMIN_USER} -p ${ICINGAWEB2_ADMIN_PASS}
 
   # Idempotent 
   STATUS_FILE="/opt/onetime/.netbox_import_done"
