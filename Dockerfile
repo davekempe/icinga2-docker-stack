@@ -29,6 +29,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     dnsutils \
     file \
     gnupg \
+    sshpass \
     jq \
     libdbd-mysql-perl \
     libdigest-hmac-perl \
