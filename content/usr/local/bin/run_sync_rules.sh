@@ -3,80 +3,92 @@
 # Exit on error
 set -e
 
-# Function to run a sync rule
+# Run Sync function
 run_sync_rule() {
   local rule_id=$1
   local rule_name=$2
   echo "Running sync rule ID: $rule_id - $rule_name"
   icingacli director syncrule run --id "$rule_id"
   if [ $? -eq 0 ]; then
-    echo "Sync rule $rule_name completed successfully."
+    echo ""
   else
-    echo "Sync rule $rule_name failed."
+    echo "Sync rule $rule_name ($id) failed."
+    echo ""
   fi
 }
 
-# Fetch all sync rules, cleaning out every second line
+# Get all rule
 all_sync_rules=$(icingacli director syncrule list | awk 'NR % 2 == 1' | awk -F '|' '{gsub(/^[ \t]+|[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2); print $1 " " $2}')
 
-# Exclude Contact rules and handle them separately
-contact_rules=()
-other_rules=()
+zone_ids=()
+endpoint_ids=()
+group_ids=()
+template_ids=()
+user_ids=()
+other_ids=()
 
+
+# Sort them into order
 while IFS= read -r line; do
-  if [[ "$line" == *"Contacts"* ]]; then
-    contact_rules+=("$line")
-  else
-    other_rules+=("$line")
+  if [[ "$line" =~ ^[0-9] ]]; then  # Check if line starts with a digit
+        id=$(echo "$line" | grep -o '^[0-9]*') # Extract the number at the beginning
+    lower_line=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lower_line" =~ zone ]]; then
+      zone_ids+=("$id")
+    elif [[ "$lower_line" =~ endpoint ]]; then
+      endpoint_ids+=("$id")
+    elif [[ "$lower_line" =~ group ]]; then
+      group_ids+=("$id")
+    elif [[ "$lower_line" =~ template ]]; then
+      template_ids+=("$id")
+    elif [[ "$lower_line" =~ user ]]; then
+      user_ids+=("$id")
+    else
+      other_ids+=("$id")
+    fi
   fi
 done <<< "$all_sync_rules"
 
-# Define the execution order based on NetBox data model dependencies for non-contact rules
-declare -a ordered_rules=(
-  "Region"             # Parent regions first
-  "Site"               # Then sites
-  "Device Role"        # Device roles before hosts
-  "Platform"           # Platforms and types before devices
-  "Platform Families"
-  "Platform Types"
-  "Cluster"            # Clusters and their types/groups
-  "Cluster Group"
-  "Cluster Type"
-  "Tag"                # Tags can come later
-  "Default Virtual Machine" # Finally, virtual machines and devices
-  "Default Device"
-)
+# Debug
+echo zone ${zone_ids[@]}
+echo endpoint ${endpoint_ids[@]}
+echo group ${group_ids[@]}
+echo template ${template_ids[@]}
+echo user ${user_ids[@]}
+echo other ${other_ids[@]}
+echo ""
 
-# Run non-contact sync rules in the specified order
-for rule_keyword in "${ordered_rules[@]}"; do
-  echo "Processing sync rules matching: $rule_keyword"
-  for line in "${other_rules[@]}"; do
-    rule_id=$(echo "$line" | awk '{print $1}')
-    rule_name=$(echo "$line" | cut -d' ' -f2-)
-    if [[ "$rule_name" == *"$rule_keyword"* ]]; then
-      run_sync_rule "$rule_id" "$rule_name"
-    fi
-  done
+# Run rules in the right order
+for id in "${zone_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
 done
 
-# Process Contact rules in the specified order
-declare -a contact_order=(
-  "Netbox Contacts -> Users"
-  "Netbox Contacts Enhanced Email (Host Assignment) -> Notification Apply"
-  "Netbox Contacts Enhanced Email (Service Assignment) -> Notification Apply"
-  "Netbox Contacts Pushover (Host Assignment) -> Notification Apply"
-  "Netbox Contacts Pushover (Service Assignment) -> Notification Apply"
-)
-
-echo "Processing Contact sync rules in defined order:"
-for contact_name in "${contact_order[@]}"; do
-  for line in "${contact_rules[@]}"; do
-    rule_id=$(echo "$line" | awk '{print $1}')
-    rule_name=$(echo "$line" | cut -d' ' -f2-)
-    if [[ "$rule_name" == "$contact_name" ]]; then
-      run_sync_rule "$rule_id" "$rule_name"
-    fi
-  done
+for id in "${endpoint_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
 done
 
-echo "All sync rules processed."
+for id in "${group_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
+done
+
+for id in "${template_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
+done
+
+for id in "${user_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
+done
+
+for id in "${other_ids[@]}" ; do
+        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
+        run_sync_rule "$id" "$name"
+done
+
+# Deployment
+echo "Deploying changes if required"
+icingacli director config deploy --grace-period 20
