@@ -91,8 +91,8 @@
                 "apitoken": "your_token_here",
                 "baseurl": "https://netbox.example.com/api",
                 "filter": "status=active&cf_icinga_import_source=default",
-                "flatten": "",
-                "flattenkeys": "",
+                "flatten": "_",
+                "flattenkeys": "custom_fields",
                 "linked_contacts": "1",
                 "linked_interfaces": "0",
                 "linked_services": "1",
@@ -111,8 +111,8 @@
                 "apitoken": "your_token_here",
                 "baseurl": "https://netbox.example.com/api",
                 "filter": "status=active&cf_icinga_import_source=default",
-                "flatten": "",
-                "flattenkeys": "",
+                "flatten": "_",
+                "flattenkeys": "custom_fields",
                 "linked_contacts": "1",
                 "linked_services": "1",
                 "mode": "20",
@@ -247,12 +247,12 @@
                     "source_expression": "${primary_ip_address}"
                 },
                 {
-                    "destination_field": "vars",
+                    "destination_field": "vars.ping_target",
                     "filter_expression": null,
                     "merge_policy": "override",
                     "priority": "20",
-                    "source": "Netbox Default Devices",
-                    "source_expression": "${custom_fields}"
+                    "source": "Netbox Default Virtual Machines",
+                    "source_expression": "${custom_fields_ping_target}"
                 },
                 {
                     "destination_field": "vars.tags",
@@ -407,12 +407,12 @@
                     "source_expression": "${primary_ip_address}"
                 },
                 {
-                    "destination_field": "vars",
+                    "destination_field": "vars.ping_target",
                     "filter_expression": null,
                     "merge_policy": "override",
                     "priority": "20",
                     "source": "Netbox Default Devices",
-                    "source_expression": "${custom_fields}"
+                    "source_expression": "${custom_fields_ping_target}"
                 },
                 {
                     "destination_field": "vars.tags",
