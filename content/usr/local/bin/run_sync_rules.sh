@@ -33,18 +33,18 @@ done <<< "$all_sync_rules"
 
 # Define the execution order based on NetBox data model dependencies for non-contact rules
 declare -a ordered_rules=(
-  "Regions"             # Parent regions first
-  "Sites"               # Then sites
-  "Device Roles"        # Device roles before hosts
-  "Platforms"           # Platforms and types before devices
+  "Region"             # Parent regions first
+  "Site"               # Then sites
+  "Device Role"        # Device roles before hosts
+  "Platform"           # Platforms and types before devices
   "Platform Families"
   "Platform Types"
-  "Clusters"            # Clusters and their types/groups
-  "Cluster Groups"
-  "Cluster Types"
-  "Tags"                # Tags can come later
-  "Default Virtual Machines" # Finally, virtual machines and devices
-  "Default Devices"
+  "Cluster"            # Clusters and their types/groups
+  "Cluster Group"
+  "Cluster Type"
+  "Tag"                # Tags can come later
+  "Default Virtual Machine" # Finally, virtual machines and devices
+  "Default Device"
 )
 
 # Run non-contact sync rules in the specified order
