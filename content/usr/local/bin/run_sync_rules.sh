@@ -12,7 +12,7 @@ run_sync_rule() {
   if [ $? -eq 0 ]; then
     echo ""
   else
-    echo "Sync rule $rule_name ($id) failed."
+    echo "Sync rule $rule_id - $rule_name failed."
     echo ""
   fi
 }
@@ -60,32 +60,26 @@ echo ""
 
 # Run rules in the right order
 for id in "${zone_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
 for id in "${endpoint_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
 for id in "${group_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
 for id in "${template_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
 for id in "${user_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
 for id in "${other_ids[@]}" ; do
-        name=`echo "$all_sync_rules" | grep "^$id" | cut -f2-99 -d' '`
         run_sync_rule "$id" "$name"
 done
 
