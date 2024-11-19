@@ -76,7 +76,7 @@
             "object_type": "object"
         },
         "hstg_source_default": {
-            "assign_filter": "\"Import Source - Default\"=host.templates",
+            "assign_filter": "\"Default\"=host.templates",
             "display_name": "Source: Default",
             "object_name": "hstg_source_default",
             "object_type": "object"
