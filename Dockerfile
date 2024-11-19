@@ -26,6 +26,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     bc \
     ca-certificates \
     curl \
+    coreutils \
     dnsutils \
     file \
     gnupg \
