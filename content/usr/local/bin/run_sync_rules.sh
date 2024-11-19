@@ -31,7 +31,7 @@ other_ids=()
 # Sort them into order
 while IFS= read -r line; do
   if [[ "$line" =~ ^[0-9] ]]; then  # Check if line starts with a digit
-        id=$(echo "$line" | grep -o '^[0-9]*') # Extract the number at the beginning
+    id=$(echo "$line" | grep -o '^[0-9]*') # Extract the number at the beginning
     lower_line=$(echo "$line" | tr '[:upper:]' '[:lower:]')
     if [[ "$lower_line" =~ zone ]]; then
       zone_ids+=("$id")
