@@ -119,7 +119,6 @@
             "device_type": {"slug": "google-public-dns"},
             "role": {"slug": "dns-server"},
             "site": {"slug": "demo-site"},
-            "manufacturer": {"slug": "google"},
             "status": "active",
             "description": "Google Public DNS (demo)",
             "custom_fields": {"icinga_import_source": "default"}
@@ -129,7 +128,6 @@
             "device_type": {"slug": "cloudflare-public-dns"},
             "role": {"slug": "dns-server"},
             "site": {"slug": "demo-site"},
-            "manufacturer": {"slug": "cloudflare"},
             "status": "active",
             "description": "Cloudflare Public DNS (demo)",
             "custom_fields": {"icinga_import_source": "default"}
