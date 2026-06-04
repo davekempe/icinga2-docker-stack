@@ -2,7 +2,8 @@
 """Idempotent NetBox seeder for the Icinga2 POC stack.
 
 Reads a JSON payload describing tags, contacts, custom fields, sites, devices,
-VMs, etc. and creates them in NetBox via the REST API. Safe to run repeatedly.
+VMs, interfaces, IPs, etc. and creates them in NetBox via the REST API. Safe to
+run repeatedly.
 
 Uses plain `requests` (no pynetbox dependency) so it works regardless of the
 distro-packaged pynetbox version. Supports both NetBox token formats:
@@ -21,9 +22,9 @@ import sys
 import requests
 
 # JSON top-level key -> (REST endpoint, lookup field, required fields for create).
-# Order in this dict is also the processing order, so referenced objects
-# (manufacturers, sites, clusters, ...) are created before the things that
-# reference them.
+# Order is the processing order, so referenced objects (manufacturers, sites,
+# clusters, ...) are created before the things that reference them. Interfaces,
+# IPs and primary-IP assignment are handled separately, after this loop.
 OBJECT_TYPES = {
     "extras.tags": ("extras/tags", "name", ["name", "slug", "color"]),
     "extras.custom-field-choice-sets": (
@@ -42,10 +43,8 @@ OBJECT_TYPES = {
         "virtualization/virtual-machines", "name", ["name", "cluster", "status"]),
 }
 
-# Nested reference fields -> (endpoint, lookup field). When a payload value is a
-# {"slug": "..."} / {"name": "..."} dict for one of these fields, it is resolved
-# to the integer id NetBox expects on write. ("type" only fires for dict values,
-# i.e. a cluster's cluster-type; custom-field "type" is a plain string.)
+# Nested reference fields -> (endpoint, lookup field). A {"slug"/"name": "..."}
+# dict for one of these fields is resolved to the integer id NetBox expects.
 FIELD_RESOLVERS = {
     "group": ("tenancy/contact-groups", "name"),
     "choice_set": ("extras/custom-field-choice-sets", "name"),
@@ -57,6 +56,24 @@ FIELD_RESOLVERS = {
     "tenant": ("tenancy/tenants", "slug"),
     "cluster": ("virtualization/clusters", "name"),
     "type": ("virtualization/cluster-types", "slug"),
+}
+
+# Per-kind endpoints for the device/VM IPAM chain.
+KINDS = {
+    "device": {
+        "parent_endpoint": "dcim/devices",
+        "iface_endpoint": "dcim/interfaces",
+        "iface_filter": "device_id",
+        "iface_parent_field": "device",
+        "assigned_object_type": "dcim.interface",
+    },
+    "vm": {
+        "parent_endpoint": "virtualization/virtual-machines",
+        "iface_endpoint": "virtualization/interfaces",
+        "iface_filter": "virtual_machine_id",
+        "iface_parent_field": "virtual_machine",
+        "assigned_object_type": "virtualization.vminterface",
+    },
 }
 
 
@@ -74,7 +91,6 @@ class NetBox:
         self.base = url.rstrip("/")
         if not self.base.endswith("/api"):
             self.base += "/api"
-        # v2 tokens carry the `nbt_` prefix and use Bearer auth; v1 use Token.
         scheme = "Bearer" if token.startswith("nbt_") else "Token"
         self.session = requests.Session()
         self.session.headers.update({
@@ -86,8 +102,8 @@ class NetBox:
     def _url(self, endpoint, suffix=""):
         return f"{self.base}/{endpoint}/{suffix}"
 
-    def find(self, endpoint, field, value):
-        resp = self.session.get(self._url(endpoint), params={field: value})
+    def find(self, endpoint, params):
+        resp = self.session.get(self._url(endpoint), params=params)
         resp.raise_for_status()
         results = resp.json().get("results", [])
         return results[0] if results else None
@@ -99,7 +115,7 @@ class NetBox:
             if isinstance(value, dict) and key in FIELD_RESOLVERS:
                 ref_endpoint, ref_field = FIELD_RESOLVERS[key]
                 lookup = value.get(ref_field) or next(iter(value.values()))
-                obj = self.find(ref_endpoint, ref_field, lookup)
+                obj = self.find(ref_endpoint, {ref_field: lookup})
                 if obj:
                     resolved[key] = obj["id"]
                 else:
@@ -111,12 +127,10 @@ class NetBox:
 
     def create_or_update(self, endpoint, field, required, payload):
         name = payload.get(field, payload.get("name", "<unknown>"))
-        existing = self.find(endpoint, field, payload[field])
+        existing = self.find(endpoint, {field: payload[field]})
         body = self.resolve_refs(payload)
 
         if existing:
-            # Only diff plain scalar fields to avoid false positives on nested
-            # representations NetBox returns for FK/choice fields.
             changes = {
                 k: v for k, v in body.items()
                 if isinstance(v, (str, int, float, bool)) and existing.get(k) != v
@@ -125,10 +139,8 @@ class NetBox:
                 print(f"  = {endpoint}/{name}: up to date")
                 return
             resp = self.session.patch(self._url(endpoint, f"{existing['id']}/"), json=changes)
-            if resp.ok:
-                print(f"  ~ {endpoint}/{name}: updated {list(changes)}")
-            else:
-                print(f"  ! {endpoint}/{name}: update failed {resp.status_code} {resp.text}")
+            print(f"  ~ {endpoint}/{name}: updated {list(changes)}" if resp.ok
+                  else f"  ! {endpoint}/{name}: update failed {resp.status_code} {resp.text}")
             return
 
         missing = [f for f in required if f not in payload]
@@ -136,27 +148,103 @@ class NetBox:
             print(f"  ! {endpoint}/{name}: missing required fields {missing}; skipping")
             return
         resp = self.session.post(self._url(endpoint), json=body)
-        if resp.ok:
-            print(f"  + {endpoint}/{name}: created")
-        else:
-            print(f"  ! {endpoint}/{name}: create failed {resp.status_code} {resp.text}")
+        print(f"  + {endpoint}/{name}: created" if resp.ok
+              else f"  ! {endpoint}/{name}: create failed {resp.status_code} {resp.text}")
+
+    # --- IPAM chain --------------------------------------------------------
+    def ensure_interface(self, kind, payload):
+        k = KINDS[kind]
+        parent_ref = payload.get(k["iface_parent_field"], {})
+        parent_name = parent_ref.get("name")
+        ifname = payload.get("name")
+        parent = self.find(k["parent_endpoint"], {"name": parent_name}) if parent_name else None
+        if not parent:
+            print(f"  ! interface {parent_name}/{ifname}: parent {kind} not found; skipping")
+            return
+        existing = self.find(k["iface_endpoint"], {k["iface_filter"]: parent["id"], "name": ifname})
+        if existing:
+            print(f"  = {k['iface_endpoint']}/{parent_name}/{ifname}: up to date")
+            return
+        body = {k["iface_parent_field"]: parent["id"], "name": ifname}
+        if kind == "device":
+            body["type"] = payload.get("type", "virtual")
+        resp = self.session.post(self._url(k["iface_endpoint"]), json=body)
+        print(f"  + {k['iface_endpoint']}/{parent_name}/{ifname}: created" if resp.ok
+              else f"  ! interface {parent_name}/{ifname}: failed {resp.status_code} {resp.text}")
+
+    def find_interface(self, kind, parent_name, ifname):
+        k = KINDS[kind]
+        parent = self.find(k["parent_endpoint"], {"name": parent_name})
+        if not parent:
+            return None
+        return self.find(k["iface_endpoint"], {k["iface_filter"]: parent["id"], "name": ifname})
+
+    def ensure_ip(self, payload):
+        address = payload["address"]
+        existing = self.find("ipam/ip-addresses", {"address": address})
+        if existing:
+            print(f"  = ipam/ip-addresses/{address}: up to date")
+            return
+        body = {"address": address, "status": payload.get("status", "active")}
+        assign = payload.get("assign")
+        if assign:
+            iface = self.find_interface(assign["kind"], assign["parent"], assign["interface"])
+            if iface:
+                body["assigned_object_type"] = KINDS[assign["kind"]]["assigned_object_type"]
+                body["assigned_object_id"] = iface["id"]
+            else:
+                print(f"  ! ipam/ip-addresses/{address}: interface "
+                      f"{assign['parent']}/{assign['interface']} not found; creating unassigned")
+        resp = self.session.post(self._url("ipam/ip-addresses"), json=body)
+        print(f"  + ipam/ip-addresses/{address}: created" if resp.ok
+              else f"  ! ipam/ip-addresses/{address}: failed {resp.status_code} {resp.text}")
+
+    def set_primary_ip(self, kind, name, address):
+        k = KINDS[kind]
+        obj = self.find(k["parent_endpoint"], {"name": name})
+        ip = self.find("ipam/ip-addresses", {"address": address})
+        if not obj or not ip:
+            print(f"  ! primary_ip {kind}/{name} -> {address}: object or IP not found; skipping")
+            return
+        current = (obj.get("primary_ip4") or {}).get("id")
+        if current == ip["id"]:
+            print(f"  = primary_ip {kind}/{name}: up to date")
+            return
+        resp = self.session.patch(self._url(k["parent_endpoint"], f"{obj['id']}/"),
+                                  json={"primary_ip4": ip["id"]})
+        print(f"  ~ primary_ip {kind}/{name} -> {address}: set" if resp.ok
+              else f"  ! primary_ip {kind}/{name}: failed {resp.status_code} {resp.text}")
 
 
 def main():
     args = get_arguments()
     with open(args.file, "r") as fh:
-        # Substitute ${VAR} references from the environment (gateway, host specs).
         raw = os.path.expandvars(fh.read())
     data = json.loads(raw)
 
     nb = NetBox(args.url, args.token)
 
+    # 1. Simple objects (in dependency order).
     for key, (endpoint, field, required) in OBJECT_TYPES.items():
         if key not in data:
             continue
         print(f"Processing {key} -> {endpoint}")
         for payload in data[key]:
             nb.create_or_update(endpoint, field, required, payload)
+
+    # 2. Interfaces (need their parent device/VM to exist first).
+    for payload in data.get("dcim.interfaces", []):
+        nb.ensure_interface("device", payload)
+    for payload in data.get("virtualization.interfaces", []):
+        nb.ensure_interface("vm", payload)
+
+    # 3. IP addresses (assigned to the interfaces above).
+    for payload in data.get("ipam.ip-addresses", []):
+        nb.ensure_ip(payload)
+
+    # 4. Promote IPs to primary so the Director sync uses them as host address.
+    for payload in data.get("primary-ips", []):
+        nb.set_primary_ip(payload["kind"], payload["name"], payload["address"])
 
 
 if __name__ == "__main__":

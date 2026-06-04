@@ -46,7 +46,8 @@ IP and published port.
 
 ## Data flow
 
-1. The launcher seeds the **bundled** NetBox with demo devices/VMs (see [NetBox](netbox.md)).
+1. The launcher seeds the **bundled** NetBox with demo devices/VMs — some with a
+   primary IP, some name-only (see [NetBox](netbox.md)).
 2. Icinga Director's **NetBox import source** pulls objects matching
    `status=active & cf_icinga_import_source=default`.
 3. A **sync rule** turns them into Icinga `Host` objects (the host `address` comes

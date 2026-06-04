@@ -27,18 +27,39 @@ This is minted by `netbox-docker`'s `super_user.py` from `SUPERUSER_API_KEY`
 
 On first start the bundled NetBox is seeded (from
 `content/opt/onetime/netbox-data.json`, via `netbox-importer.py`) so the sync has
-something to import. The seeder is idempotent and creates only what's missing:
+something to import. The seeder is idempotent and creates only what's missing.
 
-- **8.8.8.8 / 1.1.1.1** — Google / Cloudflare public DNS (devices)
-- **google.com** — resolved by DNS (device)
-- **your default gateway** — detected at runtime (device)
-- **this host as a VM** — named after the container, with detected vCPU/RAM
+The demo set deliberately mixes the two ways a host gets its monitored address:
 
-Supporting scaffolding is also created: a site, manufacturers, device types,
-roles, a cluster type and cluster, plus the custom fields/tags/contacts the
-import source expects. Hosts are named by their **reachable address** (the sync
-maps `address` from the NetBox object name), so they go green without needing
-IPAM data.
+| NetBox object | Kind | Primary IP | Icinga host address |
+| ------------- | ---- | ---------- | ------------------- |
+| `google-dns` | device | `8.8.8.8/32` on `eth0` | `8.8.8.8` (from primary IP) |
+| `gateway` | device | your gateway on `eth0` (detected) | the gateway IP (from primary IP) |
+| `cloudflare-dns` | VM | `1.1.1.1/32` on `eth0` | `1.1.1.1` (from primary IP) |
+| `google.com` | device | — | `google.com` (falls back to the name) |
+| *(container hostname)* | VM | — | the name (falls back to the name) |
+
+This shows the **address-resolution rule** of the sync (see below): a friendly
+NetBox name with a primary IP gets the IP as its Icinga `address`; a host with no
+primary IP falls back to using its name as the address.
+
+The seeder also creates the supporting scaffolding — a site, manufacturers,
+device types, roles, a cluster type and cluster, interfaces and IP addresses, and
+the custom fields/tags/contacts the import source expects.
+
+### How the host address is chosen
+
+The sync rule maps two properties onto the Icinga host `address`:
+
+```
+address <- ${name}                priority 14   (no filter)
+address <- ${primary_ip_address}  priority 15   filter: primary_ip_address!=   (override)
+```
+
+So the **primary IP wins when one exists** (higher priority, applied only when
+non-empty); otherwise the host **name** is used. That's why `google.com` and the
+host VM are pinged by name, while `google-dns`/`gateway`/`cloudflare-dns` are
+pinged by their primary IP.
 
 ## Using your own NetBox
 

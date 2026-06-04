@@ -90,12 +90,10 @@
 
     "dcim.manufacturers": [
         {"name": "Google", "slug": "google"},
-        {"name": "Cloudflare", "slug": "cloudflare"},
         {"name": "Generic", "slug": "generic"}
     ],
     "dcim.device-types": [
         {"manufacturer": {"slug": "google"}, "model": "Public DNS", "slug": "google-public-dns"},
-        {"manufacturer": {"slug": "cloudflare"}, "model": "Public DNS", "slug": "cloudflare-public-dns"},
         {"manufacturer": {"slug": "generic"}, "model": "Generic Appliance", "slug": "generic-appliance"}
     ],
     "dcim.device-roles": [
@@ -115,21 +113,21 @@
 
     "dcim.devices": [
         {
-            "name": "8.8.8.8",
+            "name": "google-dns",
             "device_type": {"slug": "google-public-dns"},
             "role": {"slug": "dns-server"},
             "site": {"slug": "demo-site"},
             "status": "active",
-            "description": "Google Public DNS (demo)",
+            "description": "Google Public DNS (demo) - address comes from its primary IP",
             "custom_fields": {"icinga_import_source": "default"}
         },
         {
-            "name": "1.1.1.1",
-            "device_type": {"slug": "cloudflare-public-dns"},
-            "role": {"slug": "dns-server"},
+            "name": "gateway",
+            "device_type": {"slug": "generic-appliance"},
+            "role": {"slug": "gateway"},
             "site": {"slug": "demo-site"},
             "status": "active",
-            "description": "Cloudflare Public DNS (demo)",
+            "description": "Default gateway of the Icinga host (demo) - primary IP detected at runtime",
             "custom_fields": {"icinga_import_source": "default"}
         },
         {
@@ -138,29 +136,52 @@
             "role": {"slug": "server"},
             "site": {"slug": "demo-site"},
             "status": "active",
-            "description": "Google web (demo, resolved by DNS)",
-            "custom_fields": {"icinga_import_source": "default"}
-        },
-        {
-            "name": "${DEFAULT_GATEWAY}",
-            "device_type": {"slug": "generic-appliance"},
-            "role": {"slug": "gateway"},
-            "site": {"slug": "demo-site"},
-            "status": "active",
-            "description": "Default gateway of the Icinga host (demo)",
+            "description": "Web (demo) - no primary IP, so the host name is used as the address",
             "custom_fields": {"icinga_import_source": "default"}
         }
     ],
 
     "virtualization.virtual-machines": [
         {
+            "name": "cloudflare-dns",
+            "cluster": {"name": "Demo Cluster"},
+            "status": "active",
+            "vcpus": "1",
+            "memory": "512",
+            "description": "Cloudflare DNS (demo VM) - address comes from its primary IP 1.1.1.1",
+            "custom_fields": {"icinga_import_source": "default"}
+        },
+        {
             "name": "${VM_NAME}",
             "cluster": {"name": "Demo Cluster"},
             "status": "active",
             "vcpus": "${VM_VCPUS}",
             "memory": "${VM_MEMORY_MB}",
-            "description": "The Icinga POC host itself, as a VM (demo)",
+            "description": "The Icinga POC host itself, as a VM (demo) - no primary IP, name is used",
             "custom_fields": {"icinga_import_source": "default"}
         }
+    ],
+
+    "dcim.interfaces": [
+        {"device": {"name": "google-dns"}, "name": "eth0", "type": "virtual"},
+        {"device": {"name": "gateway"}, "name": "eth0", "type": "virtual"}
+    ],
+    "virtualization.interfaces": [
+        {"virtual_machine": {"name": "cloudflare-dns"}, "name": "eth0"}
+    ],
+
+    "ipam.ip-addresses": [
+        {"address": "8.8.8.8/32", "status": "active",
+         "assign": {"kind": "device", "parent": "google-dns", "interface": "eth0"}},
+        {"address": "${DEFAULT_GATEWAY}/24", "status": "active",
+         "assign": {"kind": "device", "parent": "gateway", "interface": "eth0"}},
+        {"address": "1.1.1.1/32", "status": "active",
+         "assign": {"kind": "vm", "parent": "cloudflare-dns", "interface": "eth0"}}
+    ],
+
+    "primary-ips": [
+        {"kind": "device", "name": "google-dns", "address": "8.8.8.8/32"},
+        {"kind": "device", "name": "gateway", "address": "${DEFAULT_GATEWAY}/24"},
+        {"kind": "vm", "name": "cloudflare-dns", "address": "1.1.1.1/32"}
     ]
 }
