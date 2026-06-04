@@ -18,11 +18,11 @@
     {
       "type": "static-text",
       "title": "Heading",
-      "rect": { "x": 5, "y": 4, "w": 90, "h": 12 },
+      "rect": { "x": 5, "y": 3, "w": 90, "h": 10 },
       "rotation": 0,
       "options": {
         "text": "Icinga2 + NetBox POC — Meerkat Demo",
-        "fontSize": "48",
+        "fontSize": "44",
         "fontColor": "white",
         "backgroundColor": "#0067a0",
         "textAlign": "center",
@@ -33,13 +33,13 @@
     {
       "type": "check-card",
       "title": "Host: meerkat-demo",
-      "rect": { "x": 8, "y": 24, "w": 38, "h": 26 },
+      "rect": { "x": 35, "y": 16, "w": 30, "h": 14 },
       "rotation": 0,
       "options": {
         "objectType": "host",
         "objectName": "meerkat-demo",
         "objectAttr": "state",
-        "fontSize": "30",
+        "fontSize": "26",
         "textAlign": "center",
         "textVerticalAlign": "center"
       }
@@ -47,44 +47,44 @@
     {
       "type": "check-card",
       "title": "Ping",
-      "rect": { "x": 54, "y": 24, "w": 38, "h": 26 },
+      "rect": { "x": 4, "y": 33, "w": 30, "h": 14 },
       "rotation": 0,
-      "options": {
-        "objectType": "service",
-        "objectName": "meerkat-demo!Ping",
-        "objectAttr": "state",
-        "fontSize": "30",
-        "textAlign": "center",
-        "textVerticalAlign": "center"
-      }
+      "options": { "objectType": "service", "objectName": "meerkat-demo!Ping", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
     },
     {
       "type": "check-card",
       "title": "Load",
-      "rect": { "x": 8, "y": 56, "w": 38, "h": 26 },
+      "rect": { "x": 35, "y": 33, "w": 30, "h": 14 },
       "rotation": 0,
-      "options": {
-        "objectType": "service",
-        "objectName": "meerkat-demo!Load",
-        "objectAttr": "state",
-        "fontSize": "30",
-        "textAlign": "center",
-        "textVerticalAlign": "center"
-      }
+      "options": { "objectType": "service", "objectName": "meerkat-demo!Load", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
     },
     {
       "type": "check-card",
       "title": "Processes",
-      "rect": { "x": 54, "y": 56, "w": 38, "h": 26 },
+      "rect": { "x": 66, "y": 33, "w": 30, "h": 14 },
       "rotation": 0,
-      "options": {
-        "objectType": "service",
-        "objectName": "meerkat-demo!Processes",
-        "objectAttr": "state",
-        "fontSize": "30",
-        "textAlign": "center",
-        "textVerticalAlign": "center"
-      }
+      "options": { "objectType": "service", "objectName": "meerkat-demo!Processes", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
+    },
+    {
+      "type": "check-card",
+      "title": "HTTP",
+      "rect": { "x": 4, "y": 51, "w": 30, "h": 14 },
+      "rotation": 0,
+      "options": { "objectType": "service", "objectName": "meerkat-demo!HTTP", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
+    },
+    {
+      "type": "check-card",
+      "title": "DNS",
+      "rect": { "x": 35, "y": 51, "w": 30, "h": 14 },
+      "rotation": 0,
+      "options": { "objectType": "service", "objectName": "meerkat-demo!DNS", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
+    },
+    {
+      "type": "check-card",
+      "title": "SMTP",
+      "rect": { "x": 66, "y": 51, "w": 30, "h": 14 },
+      "rotation": 0,
+      "options": { "objectType": "service", "objectName": "meerkat-demo!SMTP", "objectAttr": "state", "fontSize": "24", "textAlign": "center", "textVerticalAlign": "center" }
     }
   ]
 }

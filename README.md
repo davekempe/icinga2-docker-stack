@@ -8,6 +8,8 @@ Forked from Jordon's excellent work here and updated with IcingaDB, latest direc
 
 Yes this has everything in the one container. No, thats not the docker way. The point of this is to make it easy to run a demo instance of all of this great software quickly.
 
+📖 **Documentation:** [Overview](docs/overview.md) · [Quickstart](docs/quickstart.md) · [NetBox](docs/netbox.md) · [Proxy](docs/proxy.md) · [Meerkat](docs/meerkat.md) — see [`docs/`](docs/).
+
 
 ## Quickstart
 
