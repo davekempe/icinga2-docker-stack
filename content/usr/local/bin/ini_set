@@ -2,6 +2,7 @@
 
 import configparser  # Changed from ConfigParser to configparser for Python 3
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description='Set values in ini-files.')
 
@@ -19,5 +20,12 @@ if not config.has_section(args.section):
     config.add_section(args.section)
 
 config.set(args.section, args.option, args.value)
+
+# Ensure the parent directory exists (some setup scripts write module config
+# files before the owning module's setup step has created its directory).
+parent = os.path.dirname(args.file)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+
 config.write(open(args.file, 'w'))
 

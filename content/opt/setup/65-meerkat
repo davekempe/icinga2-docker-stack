@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# Configure Meerkat to talk to the local Icinga2 API so dashboards show live
+# data. We reuse the Director API user (permissions = ["*"]) created in
+# 61-icingaweb2-director, so no extra Icinga API user is needed.
+
+. /opt/helpers
+
+TOML=/opt/sol1/meerkat/meerkat.toml
+[ -f "$TOML" ] || exit 0
+
+ini_user="${ICINGA2_FEATURE_DIRECTOR_USER:-icinga2-director}"
+ini_pass="${ICINGA2_FEATURE_DIRECTOR_PASS:-${DEFAULT_MYSQL_PASS}}"
+
+sed -i \
+  -e "s|^IcingaURL = .*|IcingaURL = \"https://127.0.0.1:5665\"|" \
+  -e "s|^IcingaUsername = .*|IcingaUsername = \"${ini_user}\"|" \
+  -e "s|^IcingaPassword = .*|IcingaPassword = \"${ini_pass}\"|" \
+  "$TOML"
+
+# Skip TLS verification of Icinga's self-signed API certificate.
+if grep -q "^#\?IcingaInsecureTLS" "$TOML"; then
+  sed -i "s|^#\?IcingaInsecureTLS = .*|IcingaInsecureTLS = true|" "$TOML"
+else
+  echo "IcingaInsecureTLS = true" >> "$TOML"
+fi
+
+# The bundled demo dashboard is added to the image as root; let the meerkat
+# user manage dashboards (create/edit) at runtime.
+chown -R meerkat /opt/sol1/meerkat/dashboards 2>/dev/null || true
+
+echo "=> Meerkat configured to use Icinga API as ${ini_user}"

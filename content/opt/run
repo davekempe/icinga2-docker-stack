@@ -80,6 +80,8 @@ END
 mkdir -p /etc/icinga2/archive
 mv /etc/icinga2/conf.d/* /etc/icinga2/archive/
 mv /etc/icinga2/archive/api-user*.conf /etc/icinga2/conf.d/
+# Keep the self-contained Meerkat demo host (gives Meerkat live data to show)
+mv /etc/icinga2/archive/meerkat-demo.conf /etc/icinga2/conf.d/ 2>/dev/null || true
 
 icinga2 daemon --validate
 

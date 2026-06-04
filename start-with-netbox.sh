@@ -235,9 +235,22 @@ if [ -z "$LAN_IP" ]; then
 fi
 export LAN_IP=$LAN_IP
 
-check_port_in_use "$ICINGA_PORT"
-check_port_in_use "$MEERKAT_PORT"
-if ! $EXTERNAL_NETBOX; then
+# Is one of our own stack's containers already running? (makes re-runs idempotent)
+container_running() {
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "$1"
+}
+ICINGA_ALREADY_RUNNING=false
+NETBOX_ALREADY_RUNNING=false
+if container_running 'icinga2-docker-stack.*icinga2'; then ICINGA_ALREADY_RUNNING=true; fi
+if container_running 'netbox-docker-netbox-1'; then NETBOX_ALREADY_RUNNING=true; fi
+
+# Only port-check what we're about to bind fresh; our own running containers
+# legitimately already hold these ports and compose will recreate them.
+if ! $ICINGA_ALREADY_RUNNING; then
+  check_port_in_use "$ICINGA_PORT"
+  check_port_in_use "$MEERKAT_PORT"
+fi
+if ! $EXTERNAL_NETBOX && ! $NETBOX_ALREADY_RUNNING; then
   check_port_in_use "$NETBOX_PORT"
 fi
 
@@ -258,9 +271,12 @@ echo "Meerkat will be deployed at: https://${LAN_IP}:${MEERKAT_PORT}"
 echo
 
 # ---------------------------------------------------------------------------
-# Deploy NetBox (unless using an external one)
+# Deploy NetBox (unless using an external one, or it's already running)
 # ---------------------------------------------------------------------------
-if ! $EXTERNAL_NETBOX; then
+if ! $EXTERNAL_NETBOX && $NETBOX_ALREADY_RUNNING; then
+  echo "NetBox is already running; leaving it as-is."
+fi
+if ! $EXTERNAL_NETBOX && ! $NETBOX_ALREADY_RUNNING; then
   echo "--- Cloning NetBox Docker (${NETBOX_DOCKER_REF}) ---"
   echo
 
@@ -360,7 +376,7 @@ echo "--- Waiting for Icinga2 to start ---"
 echo
 
 URL="http://${LAN_IP}:${ICINGA_PORT}"
-TIMEOUT=120  # seconds
+TIMEOUT=600  # seconds (first boot does MySQL schema import, kickstart, basket imports)
 
 spinner=("(^_^)" "(^o^)" "(^_^;)" "(>_<)" "(^_^)b" "(T_T)")
 elapsed=0

@@ -21,7 +21,7 @@ Default endpoints (the script auto-detects your LAN IP):
 
 - Icinga Web 2 — `http://<lan-ip>:8002/icingaweb2` (`icingaadmin` / `icinga`)
 - NetBox — `http://<lan-ip>:8001` (`admin` / `admin`)
-- Meerkat — `https://<lan-ip>:8888`
+- Meerkat — `https://<lan-ip>:8888` (ships a sample **Demo** dashboard showing the built-in `meerkat-demo` host; Meerkat is auto-configured against the local Icinga2 API)
 
 ### Use an existing / different NetBox
 
