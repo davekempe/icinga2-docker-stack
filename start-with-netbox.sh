@@ -36,6 +36,18 @@ NETBOX_API_KEY="icingademo01"
 NETBOX_API_SECRET="icinganetboxdemotoken1234567890abcdefghi"
 NETBOX_V2_TOKEN="nbt_${NETBOX_API_KEY}.${NETBOX_API_SECRET}"
 
+# Resource sizing. This POC runs two stacks at once (NetBox stack ~1.2-1.5GB +
+# the Icinga all-in-one container ~0.8-1GB) plus the OS.
+REC_RAM_MB=4096      # recommended RAM
+MIN_RAM_MB=2048      # hard floor (only usable with swap; slow)
+REC_SWAP_MB=2048     # recommended swap when RAM < recommended
+MIN_CPU=2            # recommended/minimum cpu cores
+REC_DISK_GB=20       # recommended free disk
+MIN_DISK_GB=15       # hard floor for free disk
+
+# Skip the preflight resource check with --skip-checks or SKIP_SPEC_CHECK=1
+SKIP_SPEC_CHECK="${SKIP_SPEC_CHECK:-0}"
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -57,6 +69,11 @@ Usage:
       <TOKEN> a NetBox API token. NetBox 4.5+ "v2" tokens look like
               nbt_<key>.<secret> and are sent as a Bearer token automatically;
               legacy "v1" tokens are sent as a Token header.
+
+Options:
+  --skip-checks   Skip the preflight RAM/CPU/disk check (or set SKIP_SPEC_CHECK=1).
+
+Recommended host: 4 GB RAM, 2 vCPU, 20 GB free disk (2 GB RAM works only with swap).
 USAGE
   exit "${1:-0}"
 }
@@ -72,6 +89,10 @@ while [[ $# -gt 0 ]]; do
         usage 1
       fi
       shift 3
+      ;;
+    --skip-checks)
+      SKIP_SPEC_CHECK=1
+      shift
       ;;
     -h|--help)
       usage 0
@@ -90,6 +111,72 @@ check_port_in_use() {
     exit 1
   fi
 }
+
+# Preflight: warn (and on hard-floor breaches, prompt) about insufficient
+# RAM / CPU / disk before pulling images and building.
+preflight_specs() {
+  if [ "$SKIP_SPEC_CHECK" = "1" ]; then
+    echo "Skipping resource preflight check (SKIP_SPEC_CHECK=1)."
+    return 0
+  fi
+
+  local ram_mb swap_mb cpu disk_gb
+  ram_mb=$(awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+  swap_mb=$(awk '/SwapTotal/{printf "%d",$2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+  cpu=$(nproc 2>/dev/null || echo 1)
+  disk_gb=$(df -PBG . | awk 'NR==2{gsub("G","",$4); print $4}' 2>/dev/null || echo 0)
+
+  echo "--- Host resources ---"
+  printf "  RAM:   %5s MB   (recommended %s MB, minimum %s MB)\n" "$ram_mb" "$REC_RAM_MB" "$MIN_RAM_MB"
+  printf "  Swap:  %5s MB\n" "$swap_mb"
+  printf "  CPU:   %5s cores (recommended %s)\n" "$cpu" "$MIN_CPU"
+  printf "  Disk:  %5s GB   (recommended %s GB, minimum %s GB) free on $(pwd)\n" "$disk_gb" "$REC_DISK_GB" "$MIN_DISK_GB"
+  echo
+
+  local warnings=() blockers=()
+  if [ "$cpu" -lt "$MIN_CPU" ] 2>/dev/null; then
+    warnings+=("Only ${cpu} CPU core(s); ${MIN_CPU}+ recommended (first boot will be slow).")
+  fi
+
+  if [ "$ram_mb" -lt "$MIN_RAM_MB" ] 2>/dev/null; then
+    blockers+=("RAM ${ram_mb} MB is below the ${MIN_RAM_MB} MB floor.")
+  elif [ "$ram_mb" -lt "$REC_RAM_MB" ] 2>/dev/null; then
+    warnings+=("RAM ${ram_mb} MB is below the recommended ${REC_RAM_MB} MB; both stacks may contend / risk OOM.")
+    if [ "$swap_mb" -lt "$REC_SWAP_MB" ] 2>/dev/null; then
+      warnings+=("Add at least ${REC_SWAP_MB} MB swap, e.g.:
+    fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab")
+    fi
+  fi
+
+  if [ "$disk_gb" -lt "$MIN_DISK_GB" ] 2>/dev/null; then
+    blockers+=("Free disk ${disk_gb} GB is below the ${MIN_DISK_GB} GB floor.")
+  elif [ "$disk_gb" -lt "$REC_DISK_GB" ] 2>/dev/null; then
+    warnings+=("Free disk ${disk_gb} GB is below the recommended ${REC_DISK_GB} GB.")
+  fi
+
+  local w
+  for w in "${warnings[@]}"; do echo "  [warn] $w"; done
+  for w in "${blockers[@]}"; do echo "  [LOW]  $w"; done
+  [ ${#warnings[@]} -eq 0 ] && [ ${#blockers[@]} -eq 0 ] && echo "  Resources look fine."
+  echo
+
+  if [ ${#blockers[@]} -gt 0 ]; then
+    if [ -t 0 ]; then
+      read -r -p "Host is under the minimum spec. Continue anyway? [y/N] " reply
+      case "$reply" in
+        [yY]|[yY][eE][sS]) echo "Continuing despite low resources." ;;
+        *) echo "Aborting. Resize the host or re-run with --skip-checks to override."; exit 1 ;;
+      esac
+    else
+      echo "Host is under the minimum spec and this is non-interactive; aborting."
+      echo "Re-run with --skip-checks (or SKIP_SPEC_CHECK=1) to override."
+      exit 1
+    fi
+  fi
+}
+
+preflight_specs
 
 # Ensure Docker (with the compose plugin) and a couple of basic tools are present.
 # On Debian/Ubuntu we install Docker CE from the upstream get.docker.com script.
@@ -204,8 +291,20 @@ services:
       SUPERUSER_PASSWORD: "${NETBOX_SUPERUSER_PASSWORD}"
       SUPERUSER_API_KEY: "${NETBOX_API_KEY}"
       SUPERUSER_API_TOKEN: "${NETBOX_API_SECRET}"
+      # Trim workers to keep memory down on small POC hosts.
+      GRANIAN_WORKERS: "2"
+    # First boot runs migrations + reindex; give it plenty of time on small
+    # hosts before compose declares the container unhealthy.
+    healthcheck:
+      test: curl -f http://localhost:8080/login/ || exit 1
+      start_period: 360s
+      timeout: 5s
+      interval: 10s
+      retries: 12
   netbox-worker:
     image: ${NETBOX_IMAGE}
+    environment:
+      GRANIAN_WORKERS: "2"
 EOF
 
   echo
