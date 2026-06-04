@@ -3,10 +3,14 @@
 echo "sleeping for a while to let is startup"
 sleep 20
 
-# config gmail password for sending emails
-sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD}|" /etc/msmtprc 
+# Sender address for notifications (configurable; defaults to a placeholder).
+NOTIFICATION_FROM_ADDRESS=${NOTIFICATION_FROM_ADDRESS:-icinga@example.com}
 
-sed -i -e "s|root@localhost|sol1icinga@gmail.com|" /etc/icinga2/conf.d/users.conf
+# config smtp credentials for sending emails (empty password = mail disabled)
+sed -i -e "s|%%NOTIFICATIONFROMADDRESS%%|${NOTIFICATION_FROM_ADDRESS}|g" /etc/msmtprc
+sed -i -e "s|%%GMAILSMTPPASSWORD%%|${GMAIL_SMTP_PASSWORD:-}|" /etc/msmtprc
+
+sed -i -e "s|root@localhost|${NOTIFICATION_FROM_ADDRESS}|" /etc/icinga2/conf.d/users.conf
 
 
 if icingacli director importsource list | grep -q -E '[0-9]+'; then
@@ -64,7 +68,7 @@ else
 
 	echo "configuring notification scripts"
 	mkdir -p /etc/icinga2/scripts/config/
-	sed -e "s/\"from_address\": \".*\"/\"from_address\": \"sol1icinga@gmail.com\"/" \
+	sed -e "s/\"from_address\": \".*\"/\"from_address\": \"${NOTIFICATION_FROM_ADDRESS}\"/" \
     -e "s|\"url\": \"http://icinga.domain.local/icingaweb2\"|\"url\": \"http://${MY_EXTERNAL_IP}:${ICINGA_PORT}/icingaweb2\"|" \
     -e "s|\"url\": \"\"|\"url\": \"${NETBOX_URL}/api\"|" \
     -e "s|\"token\": \"abcdefghijklmnopqrstuvwxyz1234567890\"|\"token\": \"${NETBOX_APIKEY}\"|" \

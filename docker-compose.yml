@@ -1,14 +1,15 @@
 services:
   icinga2:
-    image: sol1/icinga2-stack
-      #build:
-      #context: ./
-      #dockerfile: Dockerfile
-      #restart: on-failure:5
-    networks:
-      - autocon-workshop
+    # Build the image locally so you get the pinned/refreshed versions
+    # (Icinga2, IcingaDB, Director, the sol1 NetBox module, Meerkat, ...).
+    # To use the prebuilt image instead, comment out `build:` and uncomment `image:`.
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    #image: sol1/icinga2-stack
+    restart: on-failure:5
     # Set your hostname to the FQDN under which your
-    # sattelites will reach this container
+    # satellites will reach this container
     hostname: icinga2
     env_file:
       - secrets_sql.env
@@ -20,20 +21,18 @@ services:
       - ICINGA2_FEATURE_GRAPHITE_HOST=graphite
       - ICINGA2_FEATURE_GRAPHITE_PORT=2003
       - ICINGA2_FEATURE_GRAPHITE_URL=http://graphite
-      # put these in secrets_sql.env
-      #- NETBOX_URL=http://netbox/api
-      #- NETBOX_APIKEY=1234567890
+      # NETBOX_URL / NETBOX_APIKEY are written into secrets_sql.env by
+      # start-with-netbox.sh (or supply your own for an external NetBox).
       # - ICINGA2_FEATURE_GRAPHITE_SEND_THRESHOLDS=true
       # - ICINGA2_FEATURE_GRAPHITE_SEND_METADATA=false
       - ICINGAWEB2_ADMIN_USER=icingaadmin
       - ICINGAWEB2_ADMIN_PASS=icinga
       #- ICINGA2_USER_FULLNAME=Icinga2 Docker Monitoring Instance
       - DEFAULT_MYSQL_HOST=localhost
-      # Sending e-mail
-      # Sol1 has setup a gmail account just for this image to send notifications from
-      # This account's password may be changed occasionally, so please reach out to:
-      # icinga@sol1.com.au for an up to date app password
-      - GMAIL_SMTP_PASSWORD=dupz ofmo bjyc lfku
+      # Sending notification e-mail is OPTIONAL and configured via secrets_sql.env:
+      #   NOTIFICATION_FROM_ADDRESS - sender address (e.g. your Gmail address)
+      #   GMAIL_SMTP_PASSWORD       - Gmail app password (leave empty to disable mail)
+      # See https://support.google.com/accounts/answer/185833 for app passwords.
     volumes:
       - ./data/icinga/cache:/var/cache/icinga2
       - ./data/icinga/certs:/etc/apache2/ssl
@@ -50,10 +49,6 @@ services:
       - ./data/icinga/cron.d/icinga:/etc/cron.d/icinga
       - ./data/icinga/lib/mysql:/var/lib/mysql
     ports:
-      - "${ICINGA_PORT}:80"
+      - "${ICINGA_PORT:-8080}:80"
       - "5665:5665"
-      - "8888:8888"
-
-networks:
-  autocon-workshop:
-    external: true
+      - "${MEERKAT_PORT:-8888}:8888"

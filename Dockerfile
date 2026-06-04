@@ -53,7 +53,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     pwgen \
     python3 \
     python3-requests \
-    python3-pynetbox \
     snmp \
     msmtp \
     sudo \
@@ -99,7 +98,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 RUN mkdir -p /usr/share/icingaweb2/modules/ \
     # Module Netbox
     && mkdir -p /usr/share/icingaweb2/modules/netbox/ \
-    && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.0.8.1.tar.gz" \
+    && wget -q --no-cookies -O - "https://github.com/sol1/icingaweb2-module-netbox/archive/refs/tags/v4.6.0.1.tar.gz" \
     | tar xz --strip-components=1 --directory=/usr/share/icingaweb2/modules/netbox -f - \
     && true
 

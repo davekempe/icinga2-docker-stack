@@ -1,200 +1,157 @@
+#!/usr/bin/env python3
+"""Idempotent NetBox seeder for the Icinga2 POC stack.
+
+Reads a JSON payload describing tags, contacts, custom fields, etc. and
+creates them in NetBox via the REST API. Safe to run repeatedly.
+
+Uses plain `requests` (no pynetbox dependency) so it works regardless of the
+distro-packaged pynetbox version. Supports both NetBox token formats:
+  * v2 tokens (NetBox 4.5+) look like `nbt_<key>.<secret>` -> Bearer header
+  * v1 (legacy) tokens                                     -> Token header
+"""
 import argparse
 import json
-import pynetbox
+import sys
+
+import requests
+
+# Map of JSON top-level keys -> (REST endpoint, lookup field, required fields).
+OBJECT_TYPES = {
+    "extras.tags": ("extras/tags", "name", ["name", "slug", "color"]),
+    "extras.custom-field-choice-sets": (
+        "extras/custom-field-choice-sets", "name", ["name", "extra_choices"]),
+    "extras.custom-fields": ("extras/custom-fields", "name", ["name", "type", "object_types"]),
+    "dcim.device": ("dcim/devices", "name",
+                    ["name", "device_type", "role", "site", "status"]),
+    "tenancy.contact-groups": ("tenancy/contact-groups", "name", ["name", "slug"]),
+    "tenancy.contacts": ("tenancy/contacts", "name", ["name"]),
+}
+
+# Nested reference fields -> (endpoint, lookup field) used to resolve a
+# {"name": "..."} style reference into the integer id NetBox expects on write.
+FIELD_RESOLVERS = {
+    "group": ("tenancy/contact-groups", "name"),
+    "choice_set": ("extras/custom-field-choice-sets", "name"),
+    "manufacturer": ("dcim/manufacturers", "name"),
+    "device_type": ("dcim/device-types", "slug"),
+    "role": ("dcim/device-roles", "name"),
+    "site": ("dcim/sites", "name"),
+    "platform": ("dcim/platforms", "name"),
+    "tenant": ("tenancy/tenants", "name"),
+}
+
 
 def get_arguments():
-    # Initialize the parser
-    parser = argparse.ArgumentParser(description="Import Netbox Data")
-
-    # Add arguments for URL and Token
-    parser.add_argument("--url", required=True, help="The URL of the NetBox instance")
-    parser.add_argument("--token", required=True, help="The API token for authentication")
-    parser.add_argument("--file", required=True, help="Json file containing the payload")
-
-    # Parse the arguments
-    args = parser.parse_args()
-
-    # Return the parsed arguments
-    return args
-
-class Netbox:
-    def __init__(self, url, token, payload) -> None:
-        # NetBox API details
-        self.netbox_url = url
-        self.netbox_token = token
-        self.payload = payload
-        self.object_type = None
-        self.obj = None
-        self.required_fields = []
-        self.init_api()
+    parser = argparse.ArgumentParser(description="Import data into NetBox (idempotent)")
+    parser.add_argument("--url", required=True,
+                        help="Base URL of the NetBox instance (no trailing /api)")
+    parser.add_argument("--token", required=True, help="NetBox API token (v1 or v2)")
+    parser.add_argument("--file", required=True, help="JSON file containing the payload")
+    return parser.parse_args()
 
 
-    def init_api(self):
-        # Initialize pynetbox API connection
-        self.nb = pynetbox.api(self.netbox_url, token=self.netbox_token)
+class NetBox:
+    def __init__(self, url, token):
+        self.base = url.rstrip("/")
+        if not self.base.endswith("/api"):
+            self.base += "/api"
+        # v2 tokens carry the `nbt_` prefix and use Bearer auth; v1 use Token.
+        scheme = "Bearer" if token.startswith("nbt_") else "Token"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"{scheme} {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        })
 
-    def findBy(self, key):
-        self.obj = self.object_type.get(**{key: self.payload[key]})
+    def _url(self, endpoint, suffix=""):
+        return f"{self.base}/{endpoint}/{suffix}"
 
-    @property
-    def hasRequired(self):
-        missing = []
-        for key in self.required_fields:
-            if key not in self.payload:
-                missing.append(key)
-        if missing:
-            print(f"missing required fields {', '.join(missing)}")
-            return False
-        else: 
-            return True
+    def find(self, endpoint, field, value):
+        resp = self.session.get(self._url(endpoint), params={field: value})
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        return results[0] if results else None
 
-    def createOrUpdate(self):
-        # If object exists see if we need to update it
-        if self.obj:
-            # Do we need to save?
-            updated = False
-
-            for key, value in self.payload.items():
-                if isinstance(value, dict):
-                    if hasattr(self.obj, key):
-                        child_key = next(iter(value))
-                        child_value = value[child_key]
-                        if not hasattr(self.obj, key) or not hasattr(getattr(self.obj, key), child_key) or getattr(getattr(self.obj, key), child_key) != child_value:
-                            print(f"Updating '{key}' from '{getattr(self.obj, key)}' to '{value}'")
-                            setattr(self.obj, key, value)
-                            updated = True 
+    def resolve_refs(self, payload):
+        """Turn {"name": "X"} style references into integer ids for write."""
+        resolved = {}
+        for key, value in payload.items():
+            if isinstance(value, dict) and key in FIELD_RESOLVERS:
+                ref_endpoint, ref_field = FIELD_RESOLVERS[key]
+                lookup = value.get(ref_field) or next(iter(value.values()))
+                obj = self.find(ref_endpoint, ref_field, lookup)
+                if obj:
+                    resolved[key] = obj["id"]
                 else:
-                    if getattr(self.obj, key) != value:
-                        print(f"Updating '{key}' from '{getattr(self.obj, key)}' to '{value}'")
-                        setattr(self.obj, key, value)
-                        updated = True                
-            if updated:
-                self.obj.save()
-                # TODO: error handling here
-                print(f"Object '{self.payload}' updated successfully.")
+                    print(f"  ! could not resolve {key}={value!r}; sending as-is")
+                    resolved[key] = value
             else:
-                print(f"No changes detected for '{self.payload}'.")
-        # If the object doesn't exist then create it
+                resolved[key] = value
+        return resolved
+
+    def create_or_update(self, endpoint, field, required, payload):
+        name = payload.get(field, payload.get("name", "<unknown>"))
+        existing = self.find(endpoint, field, payload[field])
+        body = self.resolve_refs(payload)
+
+        if existing:
+            # Only diff plain scalar fields to avoid false positives on nested
+            # representations NetBox returns for FK/choice fields.
+            changes = {
+                k: v for k, v in body.items()
+                if isinstance(v, (str, int, float, bool)) and existing.get(k) != v
+            }
+            if not changes:
+                print(f"  = {endpoint}/{name}: up to date")
+                return
+            resp = self.session.patch(self._url(endpoint, f"{existing['id']}/"), json=changes)
+            if resp.ok:
+                print(f"  ~ {endpoint}/{name}: updated {list(changes)}")
+            else:
+                print(f"  ! {endpoint}/{name}: update failed {resp.status_code} {resp.text}")
+            return
+
+        missing = [f for f in required if f not in payload]
+        if missing:
+            print(f"  ! {endpoint}/{name}: missing required fields {missing}; skipping")
+            return
+        resp = self.session.post(self._url(endpoint), json=body)
+        if resp.ok:
+            print(f"  + {endpoint}/{name}: created")
         else:
-            if self.hasRequired:
-                self.object_type.create(self.payload)
-                print(f"Object '{self.payload['name']}' created successfully.")              
-
-class NetboxDevice(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.dcim.devices
-        self.required_fields = [ 
-            "device_type",
-            "manufacturer",
-            "role",
-            "site",
-            "status",
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
+            print(f"  ! {endpoint}/{name}: create failed {resp.status_code} {resp.text}")
 
 
-class NetboxTag(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.extras.tags
-        self.required_fields = [ 
-            "color",
-            "name",
-            "slug"
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
+def main():
+    args = get_arguments()
+    with open(args.file, "r") as fh:
+        data = json.load(fh)
 
-class NetboxCustomFields(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.extras.custom_fields
-        self.required_fields = [ 
-            "weight",
-            "filter_logic",
-            "search_weight",
-            "object_types",
-            "type",
-            "name",
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
+    nb = NetBox(args.url, args.token)
 
-class NetboxCustomFieldChoiceSets(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.extras.custom_field_choice_sets
-        self.required_fields = [ 
-            "name",
-            "extra_choices",
+    # Order matters: choice sets and contact groups must exist before the
+    # objects that reference them.
+    ordered_keys = [
+        "extras.tags",
+        "extras.custom-field-choice-sets",
+        "extras.custom-fields",
+        "tenancy.contact-groups",
+        "tenancy.contacts",
+        "dcim.device",
+    ]
+    for key in ordered_keys:
+        if key not in data:
+            continue
+        endpoint, field, required = OBJECT_TYPES[key]
+        print(f"Processing {key} -> {endpoint}")
+        for payload in data[key]:
+            nb.create_or_update(endpoint, field, required, payload)
 
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
-
-class NetboxContacts(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.tenancy.contacts
-        self.required_fields = [ 
-            "name",
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
-
-class NetboxContactGroups(Netbox):
-    def __init__(self, url, token, payload, find_key = 'name') -> None:
-        # Initialize the Netbox superclass with URL and token
-        super().__init__(url, token, payload)
-        self.object_type = self.nb.tenancy.contact_groups
-        self.required_fields = [ 
-            "name",
-            "slug",
-        ]
-        self.find_key = find_key
-        self.findBy(self.find_key)
-        self.createOrUpdate()
-
-def read_json_file(file_path):
-    # Read the JSON file from disk
-    with open(file_path, 'r') as json_file:
-        data = json.load(json_file)
-        print(data)
-    return data
 
 if __name__ == "__main__":
-    args = get_arguments()
-    if args.file:
-        payload = read_json_file(args.file)
-
-    for k,v in payload.items():
-        if k == 'extras.tags':
-            for payload in v:
-                obj = NetboxTag(args.url, args.token, payload)
-        if k == 'extras.custom-field-choice-sets':
-            for payload in v:
-                obj = NetboxCustomFieldChoiceSets(args.url, args.token, payload)
-        if k == 'extras.custom-fields':
-            for payload in v:
-                obj = NetboxCustomFields(args.url, args.token, payload)
-        if k == 'dcim.device':
-            for payload in v:
-                obj = NetboxDevice(args.url, args.token, payload)
-        if k == 'tenancy.contact-groups':
-            for payload in v:
-                obj = NetboxContactGroups(args.url, args.token, payload)
-        if k == 'tenancy.contacts':
-            for payload in v:
-                obj = NetboxContacts(args.url, args.token, payload)
+    try:
+        main()
+    except requests.RequestException as exc:
+        print(f"NetBox request failed: {exc}", file=sys.stderr)
+        sys.exit(1)

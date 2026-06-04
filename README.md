@@ -15,7 +15,31 @@ Yes this has everything in the one container. No, thats not the docker way. The 
     cd icinga2-docker-stack
     ./start-with-netbox.sh
 
-It will pull Netbox and Icinga down and run them. It will tell you the urls and ports and creds at the end of the process.
+It will deploy NetBox (via [netbox-docker](https://github.com/netbox-community/netbox-docker)) and build/run the Icinga2 stack, wire them together, and print the URLs, ports and credentials at the end.
+
+Default endpoints (the script auto-detects your LAN IP):
+
+- Icinga Web 2 — `http://<lan-ip>:8002/icingaweb2` (`icingaadmin` / `icinga`)
+- NetBox — `http://<lan-ip>:8001` (`admin` / `admin`)
+- Meerkat — `https://<lan-ip>:8888`
+
+### Use an existing / different NetBox
+
+To point Icinga at a NetBox you already run (instead of deploying one):
+
+    ./start-with-netbox.sh --external-netbox https://netbox.example.com <API_TOKEN>
+
+`<API_TOKEN>` may be a NetBox 4.5+ **v2** token (`nbt_<key>.<secret>`, sent as a `Bearer` token) or a legacy **v1** token (sent as `Token`); the stack detects which automatically.
+
+### Component versions
+
+| Component | Version |
+| --------- | ------- |
+| Base image | `debian:bookworm` (Icinga packages from the official Icinga repo = latest) |
+| NetBox | `v4.6` via netbox-docker `5.0.1` (`netboxcommunity/netbox:v4.6-5.0.1`) |
+| sol1 NetBox Director module | `v4.6.0.1` (supports NetBox v2 API tokens) |
+
+> **NetBox API tokens:** NetBox 4.6 uses the new "v2" token model (`Authorization: Bearer nbt_<key>.<secret>`; v1 `Token` headers are deprecated and removed in NetBox 4.7). The bundled NetBox is seeded with a fixed demo v2 token printed at the end of the run.
 
 This is NOT for production use. It has hard coded credentials, no scalability, and is meant to just allow you to get up and running quickly.
 For support for this image and script, please Contact Sol1: https://sol1.com.au and we would love to assist you.
@@ -103,6 +127,13 @@ The container gets automatically configured as an API master. But it has some ca
 ## Sending Notification Mails
 
 The container has `msmtp` installed, which forwards mails to a preconfigured SMTP server (MTA).
+
+**For the POC**, outbound mail is configured by two environment variables (set them in `secrets_sql.env` or the environment):
+
+- `NOTIFICATION_FROM_ADDRESS` — the sender address (e.g. your Gmail address). Used for the msmtp `from`/`user` and the Icinga notification sender. Defaults to `icinga@example.com`.
+- `GMAIL_SMTP_PASSWORD` — a Gmail [app password](https://support.google.com/accounts/answer/185833). **Leave it empty to disable outbound mail** (the stack still runs; notifications just won't send).
+
+No mail credentials are committed to this repo. For anything beyond Gmail, edit the msmtp config below.
 
 The full documentation for [msmtp is found here](https://marlam.de/msmtp).
 
@@ -238,6 +269,10 @@ Note: Please do not use special chars like ! in mysql user/password because it b
 | `ICINGAWEB2_ADMIN_USER` | icingaadmin | Icingaweb2 Login User<br>*After changing the username, you should also remove the old User in icingaweb2-> Configuration-> Authentication-> Users* |
 | `ICINGAWEB2_ADMIN_PASS` | icinga | Icingaweb2 Login Password |
 | `ICINGA2_USER_FULLNAME` | Icinga | Sender's display-name for notification e-Mails |
+| `NOTIFICATION_FROM_ADDRESS` | icinga@example.com | Sender address for notification e-mails (msmtp `from`/`user` + Icinga sender) |
+| `GMAIL_SMTP_PASSWORD` | *empty* | Gmail app password used by msmtp. Empty disables outbound mail. |
+| `NETBOX_URL` | *unset* | Base URL of the NetBox instance (no trailing `/api`). Set by `start-with-netbox.sh`. |
+| `NETBOX_APIKEY` | *unset* | NetBox API token (v1 `Token` or v2 `nbt_<key>.<secret>`). Set by `start-with-netbox.sh`. |
 | `APACHE2_HTTP` | `REDIRECT` | **Variable is only active, if both SSL-certificate and SSL-key are in place.** `BOTH`: Allow HTTP and https connections simultaneously. `REDIRECT`: Rewrite HTTP-requests to HTTPS |
 | `MYSQL_ROOT_USER` | root | If your MySQL host is not on `localhost`, but you want the icinga2 container to setup the DBs for itself, specify the root user of your MySQL server in this variable. |
 | `MYSQL_ROOT_PASSWORD` | *unset* | If your MySQL host is not on `localhost`, but you want the icinga2 container to setup the DBs for itself, specify the root password of your MySQL server in this variable. |
