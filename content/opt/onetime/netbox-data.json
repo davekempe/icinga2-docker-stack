@@ -7,23 +7,19 @@
     "tenancy.contact-groups": [{
         "name": "Awesome",
         "slug": "awesome"
-
     }],
     "tenancy.contacts": [{
         "name": "Mark Coleman",
         "email": "mcoleman@netboxlabs.com",
         "group": {"name": "Awesome"}
-
     },{
         "name": "Matthew Smith",
         "email": "matthew.smith@sol1.com.au",
         "group": {"name": "Awesome"}
-
     },{
         "name": "Dave Kempe",
         "email": "dave@sol1.com.au",
         "group": {"name": "Awesome"}
-
     }],
     "extras.custom-field-choice-sets": [{
         "extra_choices": [["no_not_monitor","Do not monitor"],["default","Default"]],
@@ -38,6 +34,15 @@
             "name": "icinga_import_source",
             "group_name": "Monitoring",
             "choice_set": {"name": "icinga_import_source_choices"}
+        },
+        {
+            "weight": "100",
+            "filter_logic": "loose",
+            "search_weight": "100",
+            "object_types": ["dcim.device", "virtualization.virtualmachine"],
+            "type": "text",
+            "name": "ping_target",
+            "group_name": "Monitoring"
         },
         {
             "weight": "100",
@@ -80,6 +85,84 @@
             "type": "text",
             "group_name": "Pushover",
             "name": "pushover_token"
+        }
+    ],
+
+    "dcim.manufacturers": [
+        {"name": "Google", "slug": "google"},
+        {"name": "Cloudflare", "slug": "cloudflare"},
+        {"name": "Generic", "slug": "generic"}
+    ],
+    "dcim.device-types": [
+        {"manufacturer": {"slug": "google"}, "model": "Public DNS", "slug": "google-public-dns"},
+        {"manufacturer": {"slug": "cloudflare"}, "model": "Public DNS", "slug": "cloudflare-public-dns"},
+        {"manufacturer": {"slug": "generic"}, "model": "Generic Appliance", "slug": "generic-appliance"}
+    ],
+    "dcim.device-roles": [
+        {"name": "DNS Server", "slug": "dns-server", "color": "2196f3"},
+        {"name": "Gateway", "slug": "gateway", "color": "9c27b0"},
+        {"name": "Server", "slug": "server", "color": "4caf50"}
+    ],
+    "dcim.sites": [
+        {"name": "Demo Site", "slug": "demo-site", "status": "active"}
+    ],
+    "virtualization.cluster-types": [
+        {"name": "Demo Hypervisor", "slug": "demo-hypervisor"}
+    ],
+    "virtualization.clusters": [
+        {"name": "Demo Cluster", "type": {"slug": "demo-hypervisor"}, "status": "active"}
+    ],
+
+    "dcim.devices": [
+        {
+            "name": "8.8.8.8",
+            "device_type": {"slug": "google-public-dns"},
+            "role": {"slug": "dns-server"},
+            "site": {"slug": "demo-site"},
+            "manufacturer": {"slug": "google"},
+            "status": "active",
+            "description": "Google Public DNS (demo)",
+            "custom_fields": {"icinga_import_source": "default"}
+        },
+        {
+            "name": "1.1.1.1",
+            "device_type": {"slug": "cloudflare-public-dns"},
+            "role": {"slug": "dns-server"},
+            "site": {"slug": "demo-site"},
+            "manufacturer": {"slug": "cloudflare"},
+            "status": "active",
+            "description": "Cloudflare Public DNS (demo)",
+            "custom_fields": {"icinga_import_source": "default"}
+        },
+        {
+            "name": "google.com",
+            "device_type": {"slug": "generic-appliance"},
+            "role": {"slug": "server"},
+            "site": {"slug": "demo-site"},
+            "status": "active",
+            "description": "Google web (demo, resolved by DNS)",
+            "custom_fields": {"icinga_import_source": "default"}
+        },
+        {
+            "name": "${DEFAULT_GATEWAY}",
+            "device_type": {"slug": "generic-appliance"},
+            "role": {"slug": "gateway"},
+            "site": {"slug": "demo-site"},
+            "status": "active",
+            "description": "Default gateway of the Icinga host (demo)",
+            "custom_fields": {"icinga_import_source": "default"}
+        }
+    ],
+
+    "virtualization.virtual-machines": [
+        {
+            "name": "${VM_NAME}",
+            "cluster": {"name": "Demo Cluster"},
+            "status": "active",
+            "vcpus": "${VM_VCPUS}",
+            "memory": "${VM_MEMORY_MB}",
+            "description": "The Icinga POC host itself, as a VM (demo)",
+            "custom_fields": {"icinga_import_source": "default"}
         }
     ]
 }

@@ -31,6 +31,17 @@ To point Icinga at a NetBox you already run (instead of deploying one):
 
 `<API_TOKEN>` may be a NetBox 4.5+ **v2** token (`nbt_<key>.<secret>`, sent as a `Bearer` token) or a legacy **v1** token (sent as `Token`); the stack detects which automatically.
 
+### Demo data
+
+On first start the bundled NetBox is seeded with a small demo dataset (under `content/opt/onetime/netbox-data.json`) so the Director NetBox sync has something useful to import. These become monitored hosts in Icinga (and show up on the Meerkat demo dashboard):
+
+- **8.8.8.8** / **1.1.1.1** — Google / Cloudflare public DNS (devices)
+- **google.com** — resolved by DNS (device)
+- **your default gateway** — detected at runtime (device)
+- **this host as a VM** — named after the container, with its detected vCPU/RAM (virtual machine)
+
+The hosts are named by their reachable address (the sync maps `address` from the NetBox object name), so they go green without needing IPAM data. Seeding only happens for the bundled NetBox — `--external-netbox` never writes demo data into your existing instance.
+
 ### Component versions
 
 | Component | Version |

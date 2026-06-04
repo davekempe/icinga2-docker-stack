@@ -339,6 +339,13 @@ echo
 echo "--- Writing configuration ---"
 echo
 
+# Seed demo data only into the bundled NetBox, never into an external one.
+if $EXTERNAL_NETBOX; then
+  SEED_NETBOX_DEMO=false
+else
+  SEED_NETBOX_DEMO=true
+fi
+
 # Create secrets_sql.env if it doesn't exist (it is gitignored).
 if [ ! -f secrets_sql.env ]; then
   MYSQL_ROOT_PASSWORD=$(openssl rand -base64 16 | tr -d /=+ | cut -c -30)
@@ -350,6 +357,7 @@ if [ ! -f secrets_sql.env ]; then
     echo "NETBOX_URL=${NETBOX_URL}"
     echo "NETBOX_APIKEY=${NETBOX_APIKEY}"
     echo "MEERKAT_PORT=${MEERKAT_PORT}"
+    echo "SEED_NETBOX_DEMO=${SEED_NETBOX_DEMO}"
     # Optional outbound mail. Leave GMAIL_SMTP_PASSWORD empty to disable.
     echo "NOTIFICATION_FROM_ADDRESS=icinga@example.com"
     echo "GMAIL_SMTP_PASSWORD="
@@ -358,10 +366,11 @@ if [ ! -f secrets_sql.env ]; then
   echo "secrets_sql.env created with generated passwords."
 else
   echo "secrets_sql.env already exists; updating NetBox settings in place."
-  # Keep NetBox URL/token in sync with this run without clobbering other values.
-  sed -i "/^NETBOX_URL=/d;/^NETBOX_APIKEY=/d" secrets_sql.env
+  # Keep NetBox URL/token/seed flag in sync with this run without clobbering other values.
+  sed -i "/^NETBOX_URL=/d;/^NETBOX_APIKEY=/d;/^SEED_NETBOX_DEMO=/d" secrets_sql.env
   echo "NETBOX_URL=${NETBOX_URL}" >> secrets_sql.env
   echo "NETBOX_APIKEY=${NETBOX_APIKEY}" >> secrets_sql.env
+  echo "SEED_NETBOX_DEMO=${SEED_NETBOX_DEMO}" >> secrets_sql.env
   grep -q "^MEERKAT_PORT=" secrets_sql.env || echo "MEERKAT_PORT=${MEERKAT_PORT}" >> secrets_sql.env
 fi
 

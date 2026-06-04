@@ -97,20 +97,27 @@ supervisor_pid=$!
   /opt/onetime/import-baskets
   python3 /opt/onetime/director_api.py -s http://localhost -u ${ICINGAWEB2_ADMIN_USER} -p ${ICINGAWEB2_ADMIN_PASS}
 
-  # Idempotent 
+  # Seed demo data into the bundled NetBox only (never into an external one).
   STATUS_FILE="/opt/onetime/.netbox_import_done"
 
-  if [ ! -f "$STATUS_FILE" ]; then
+  if ! evaluate_boolean "${SEED_NETBOX_DEMO:-true}"; then
+    echo "SEED_NETBOX_DEMO is disabled (external NetBox); skipping demo data import."
+  elif [ -f "$STATUS_FILE" ]; then
+    echo "NetBox import already done, skipping."
+  else
     echo "Running NetBox importer..."
+    # Dynamic values substituted into netbox-data.json (gateway, this host as a VM).
+    export DEFAULT_GATEWAY=$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')
+    export DEFAULT_GATEWAY=${DEFAULT_GATEWAY:-172.17.0.1}
+    export VM_NAME=$(hostname)
+    export VM_VCPUS=$(nproc 2>/dev/null || echo 1)
+    export VM_MEMORY_MB=$(awk '/MemTotal/{printf "%d",$2/1024}' /proc/meminfo 2>/dev/null || echo 1024)
     if python3 /opt/onetime/netbox-importer.py --url ${NETBOX_URL} --token ${NETBOX_APIKEY} --file /opt/onetime/netbox-data.json; then
-      # Only create the file if the import was successful
       echo "NetBox import successful, marking as done."
       touch "$STATUS_FILE"
     else
       echo "NetBox import failed, not marking as done."
     fi
-  else
-    echo "NetBox import already done, skipping."
   fi
 ) &
 
