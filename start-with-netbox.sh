@@ -193,6 +193,16 @@ preflight_specs() {
   fi
 }
 
+# This script installs packages and writes to /etc (apt, Docker, systemd
+# drop-ins), so it needs root.
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Error: this script must be run as root (it installs packages and writes to /etc)."
+    echo "Re-run with sudo, e.g.:  sudo ./start-with-netbox.sh [options]"
+    exit 1
+  fi
+}
+
 # Destinations that must never traverse the proxy (local + container/LAN flows).
 build_no_proxy() {
   echo "localhost,127.0.0.1,::1,${LAN_IP},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local,.internal,.svc"
@@ -245,6 +255,8 @@ EOF
     sleep 1; i=$((i + 1)); [ "$i" -ge 30 ] && break
   done
 }
+
+require_root
 
 # Detect the primary IPv4 address (needed for NO_PROXY and the deploy URLs).
 LAN_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
