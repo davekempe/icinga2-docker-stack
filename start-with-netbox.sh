@@ -48,6 +48,9 @@ MIN_DISK_GB=15       # hard floor for free disk
 # Skip the preflight resource check with --skip-checks or SKIP_SPEC_CHECK=1
 SKIP_SPEC_CHECK="${SKIP_SPEC_CHECK:-0}"
 
+# Optional outbound proxy (--proxy <url> or HTTP_PROXY in the environment).
+PROXY_URL="${PROXY_URL:-${HTTPS_PROXY:-${HTTP_PROXY:-${https_proxy:-${http_proxy:-}}}}}"
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -71,6 +74,10 @@ Usage:
               legacy "v1" tokens are sent as a Token header.
 
 Options:
+  --proxy <url>   Route outbound traffic through an HTTP proxy. Applies to host
+                  apt, the Docker install, the Docker daemon (image pulls), and
+                  the image build. e.g. --proxy http://proxy.example.com:3128
+                  (also honoured from HTTP_PROXY/HTTPS_PROXY in the environment).
   --skip-checks   Skip the preflight RAM/CPU/disk check (or set SKIP_SPEC_CHECK=1).
 
 Recommended host: 4 GB RAM, 2 vCPU, 20 GB free disk (2 GB RAM works only with swap).
@@ -89,6 +96,16 @@ while [[ $# -gt 0 ]]; do
         usage 1
       fi
       shift 3
+      ;;
+    --proxy)
+      PROXY_URL="${2:-}"
+      if [[ -z "$PROXY_URL" ]]; then
+        echo "Error: --proxy requires a URL, e.g. http://proxy.example.com:3128"
+        usage 1
+      fi
+      # Default to http:// if no scheme given.
+      [[ "$PROXY_URL" == *://* ]] || PROXY_URL="http://${PROXY_URL}"
+      shift 2
       ;;
     --skip-checks)
       SKIP_SPEC_CHECK=1
@@ -176,7 +193,71 @@ preflight_specs() {
   fi
 }
 
+# Destinations that must never traverse the proxy (local + container/LAN flows).
+build_no_proxy() {
+  echo "localhost,127.0.0.1,::1,${LAN_IP},10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local,.internal,.svc"
+}
+
+# Proxy for the host shell: apt, the get.docker.com installer, git clone.
+configure_proxy() {
+  [ -n "$PROXY_URL" ] || return 0
+  local np; np="$(build_no_proxy)"
+  echo "--- Routing outbound traffic through proxy: ${PROXY_URL} ---"
+
+  export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL"
+  export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL"
+  export no_proxy="$np" NO_PROXY="$np"
+
+  if [ -d /etc/apt ] && [ "$(id -u)" -eq 0 ]; then
+    mkdir -p /etc/apt/apt.conf.d
+    cat > /etc/apt/apt.conf.d/95proxy <<EOF
+Acquire::http::Proxy "${PROXY_URL}";
+Acquire::https::Proxy "${PROXY_URL}";
+EOF
+  fi
+}
+
+# Proxy for the Docker daemon (image pulls) via a systemd drop-in. Build-time
+# proxy (apt/curl/wget inside the Dockerfile) is handled by build args in
+# docker-compose.yml, which inherit HTTP_PROXY/etc. exported above.
+configure_docker_proxy() {
+  [ -n "$PROXY_URL" ] || return 0
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Proxy: not root; skipping Docker daemon proxy config."
+    return 0
+  fi
+  command -v systemctl >/dev/null 2>&1 || return 0
+  local np; np="$(build_no_proxy)"
+
+  mkdir -p /etc/systemd/system/docker.service.d
+  cat > /etc/systemd/system/docker.service.d/http-proxy.conf <<EOF
+[Service]
+Environment="HTTP_PROXY=${PROXY_URL}"
+Environment="HTTPS_PROXY=${PROXY_URL}"
+Environment="NO_PROXY=${np}"
+EOF
+  systemctl daemon-reload
+  systemctl restart docker || service docker restart || true
+
+  # Wait for the daemon to come back after the restart.
+  local i=0
+  while ! docker info >/dev/null 2>&1; do
+    sleep 1; i=$((i + 1)); [ "$i" -ge 30 ] && break
+  done
+}
+
+# Detect the primary IPv4 address (needed for NO_PROXY and the deploy URLs).
+LAN_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+[ -z "$LAN_IP" ] && LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "$LAN_IP" ]; then
+  echo "Error: Unable to determine local IPv4 address."
+  exit 1
+fi
+export LAN_IP=$LAN_IP
+
 preflight_specs
+
+configure_proxy
 
 # Ensure Docker (with the compose plugin) and a couple of basic tools are present.
 # On Debian/Ubuntu we install Docker CE from the upstream get.docker.com script.
@@ -225,15 +306,7 @@ ensure_docker() {
 
 ensure_docker
 
-# Attempt to fetch the IPv4 address of the interface with the default gateway
-LAN_IP=$(ip -4 route get 1.1.1.1 | grep -oP 'src \K\S+')
-
-# Check if the IP was retrieved successfully
-if [ -z "$LAN_IP" ]; then
-  echo "Error: Unable to determine local IPv4 address."
-  exit 1
-fi
-export LAN_IP=$LAN_IP
+configure_docker_proxy
 
 # Is one of our own stack's containers already running? (makes re-runs idempotent)
 container_running() {

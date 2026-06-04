@@ -31,6 +31,14 @@ To point Icinga at a NetBox you already run (instead of deploying one):
 
 `<API_TOKEN>` may be a NetBox 4.5+ **v2** token (`nbt_<key>.<secret>`, sent as a `Bearer` token) or a legacy **v1** token (sent as `Token`); the stack detects which automatically.
 
+### Behind an HTTP proxy
+
+If the host reaches the internet through a proxy:
+
+    ./start-with-netbox.sh --proxy http://proxy.example.com:3128
+
+This applies the proxy to host `apt`, the Docker install (`get.docker.com`), `git clone`, the Docker daemon (image pulls, via a systemd drop-in), and the image build (`apt`/`curl`/`wget` inside the Dockerfile, via build args). `NO_PROXY` is set for localhost, the host's LAN IP, and private ranges so local and container-to-container traffic bypasses the proxy. The proxy is also picked up automatically from `HTTP_PROXY`/`HTTPS_PROXY` in the environment. Run `./start-with-netbox.sh --help` for all options.
+
 ### Demo data
 
 On first start the bundled NetBox is seeded with a small demo dataset (under `content/opt/onetime/netbox-data.json`) so the Director NetBox sync has something useful to import. These become monitored hosts in Icinga (and show up on the Meerkat demo dashboard):

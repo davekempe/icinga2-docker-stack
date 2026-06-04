@@ -6,6 +6,16 @@ services:
     build:
       context: ./
       dockerfile: Dockerfile
+      # Proxy build args (empty unless start-with-netbox.sh --proxy is used).
+      # Docker treats these predefined names as proxy env for RUN steps
+      # (apt/curl/wget) without needing ARG declarations in the Dockerfile.
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     #image: sol1/icinga2-stack
     restart: on-failure:5
     # Set your hostname to the FQDN under which your
