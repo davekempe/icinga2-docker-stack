@@ -91,6 +91,53 @@ check_port_in_use() {
   fi
 }
 
+# Ensure Docker (with the compose plugin) and a couple of basic tools are present.
+# On Debian/Ubuntu we install Docker CE from the upstream get.docker.com script.
+ensure_docker() {
+  # Basic tools used by this script and the Docker installer.
+  if ! command -v curl >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      echo "--- Installing prerequisites (curl, iproute2, ca-certificates) ---"
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates iproute2 >/dev/null
+    fi
+  fi
+
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo
+  echo "--- Docker (or the compose plugin) not found; installing from upstream ---"
+  echo
+
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Error: Docker is not installed and this script is not running as root."
+    echo "Re-run as root, or install Docker manually: https://docs.docker.com/engine/install/ubuntu/"
+    exit 1
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Error: automatic Docker install only supported on Debian/Ubuntu."
+    echo "Install Docker + the compose plugin manually: https://docs.docker.com/engine/install/"
+    exit 1
+  fi
+
+  # Official Docker convenience script (installs docker-ce + compose plugin).
+  curl -fsSL https://get.docker.com | sh
+
+  # Make sure the daemon is up.
+  systemctl enable --now docker >/dev/null 2>&1 || service docker start || true
+
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "Error: Docker installation did not provide a working 'docker compose'."
+    exit 1
+  fi
+  echo "Docker installed: $(docker --version)"
+}
+
+ensure_docker
+
 # Attempt to fetch the IPv4 address of the interface with the default gateway
 LAN_IP=$(ip -4 route get 1.1.1.1 | grep -oP 'src \K\S+')
 
