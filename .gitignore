@@ -1,3 +1,5 @@
 /docker-compose.override.yml
 /data
 /*.env
+__pycache__/
+*.pyc
